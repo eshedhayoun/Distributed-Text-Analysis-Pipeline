@@ -1,0 +1,36 @@
+# 1. COMPILED & BUILD ARTIFACTS
+###############################
+# Maven output directories
+/target/
+/bin/
+
+# Java and Class Files
+*.class
+*.jar
+*.war
+*.ear
+
+# 2. IDE & CONFIGURATION FILES
+###############################
+# IntelliJ IDEA Files (Mandatory Exclusion)
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Temporary files
+*.log
+*.swp
+
+# 3. AWS SECURITY & CREDENTIALS (CRITICAL EXCLUSIONS)
+#####################################################
+# Exclude the private key file used for SSH access
+*.pem
+*.key
+
+# Exclude AWS CLI and SDK configuration files
+.aws/
+credentials
+
+# Exclude sensitive configuration file names
+*config.properties
