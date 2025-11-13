@@ -13,7 +13,16 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
+    <!-- CRITICAL FIX: Add the Stanford repository to resolve CoreNLP dependency -->
+    <repositories>
+        <repository>
+            <id>stanford-corenlp</id>
+            <url>https://oss.sonatype.org/content/repositories/releases/</url>
+        </repository>
+    </repositories>
+
     <dependencies>
+        <!-- AWS SDK for Cloud Services -->
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>ec2</artifactId>
@@ -30,6 +39,14 @@
             <version>2.28.18</version>
         </dependency>
 
+        <!-- CRITICAL FIX: Dependency for the main Stanford CoreNLP classes (StanfordCoreNLP, Document, Sentence) -->
+        <dependency>
+            <groupId>edu.stanford.nlp</groupId>
+            <artifactId>stanford-corenlp</artifactId>
+            <version>3.6.0</version>
+        </dependency>
+
+        <!-- Existing dependency for the parser models/library -->
         <dependency>
             <groupId>edu.stanford.nlp</groupId>
             <artifactId>stanford-parser</artifactId>
@@ -44,6 +61,7 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.11.0</version>
                 <configuration>
+                    <!-- Using release 17 is technically better but keeping source/target as requested -->
                     <source>${maven.compiler.source}</source>
                     <target>${maven.compiler.target}</target>
                     <encoding>UTF-8</encoding>
