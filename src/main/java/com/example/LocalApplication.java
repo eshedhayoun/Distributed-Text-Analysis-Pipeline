@@ -91,14 +91,14 @@ public class LocalApplication {
                     // 5. Gets the summary output file from S3.
                     downloadSummaryFile(s3, summaryS3Url, outputFileName);
                 }
-                deleteQueue(sqs, doneQueueName);
             }
 
             // 6. In case of terminate mode, sends a termination message to the Manager.
-            if (terminateMode) {
+            else {
                 sendTerminationMessage(sqs);
                 System.out.println("✅ Termination message sent to Manager queue. Exiting.");
             }
+            deleteQueue(sqs, doneQueueName);
 
         } catch (SqsException | S3Exception e) {
             System.err.println("AWS Service Error: " + e.getMessage());

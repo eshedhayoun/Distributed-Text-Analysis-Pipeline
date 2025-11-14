@@ -247,7 +247,9 @@ public class Manager {
      * State is tracked via S3 result files and the submittedTaskCounts map.
      */
     private static class WorkerResultMonitor implements Runnable {
-        private final SqsClient sqs; private final S3Client s3; private final String resultQueueUrl;
+        private final SqsClient sqs;
+        private final S3Client s3;
+        private final String resultQueueUrl;
         private final ConcurrentHashMap<String, List<String>> resultAggregators = new ConcurrentHashMap<>();
 
         public WorkerResultMonitor(SqsClient sqs, S3Client s3, String resultQueueUrl) {
