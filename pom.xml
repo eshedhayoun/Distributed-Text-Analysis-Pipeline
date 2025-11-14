@@ -39,12 +39,12 @@
             <version>2.28.18</version>
         </dependency>
 
-        <!-- CRITICAL FIX: Dependency for the main Stanford CoreNLP classes (StanfordCoreNLP, Document, Sentence) -->
-        <dependency>
-            <groupId>edu.stanford.nlp</groupId>
-            <artifactId>stanford-corenlp</artifactId>
-            <version>3.6.0</version>
-        </dependency>
+<!--        &lt;!&ndash; CRITICAL FIX: Dependency for the main Stanford CoreNLP classes (StanfordCoreNLP, Document, Sentence) &ndash;&gt;-->
+<!--        <dependency>-->
+<!--            <groupId>edu.stanford.nlp</groupId>-->
+<!--            <artifactId>stanford-corenlp</artifactId>-->
+<!--            <version>3.6.0</version>-->
+<!--        </dependency>-->
 
         <!-- Existing dependency for the parser models/library -->
         <dependency>
