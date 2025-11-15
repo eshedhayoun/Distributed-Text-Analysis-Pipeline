@@ -182,6 +182,11 @@ public class LocalApplication {
 
     private static void sendTaskToManager(AWS aws, String inputS3Url, String doneQueueName, int n) {
         String queueUrl = aws.getQueueUrl(AWS.INPUT_QUEUE_NAME);
+        try {
+            queueUrl = aws.getQueueUrl(AWS.INPUT_QUEUE_NAME);
+        } catch (QueueDoesNotExistException e) {
+            queueUrl = aws.createQueue(AWS.INPUT_QUEUE_NAME);
+        }
         String messageBody = String.format("%s|%s|%d", inputS3Url, doneQueueName, n);
 
         aws.getSqsClient().sendMessage(SendMessageRequest.builder()
