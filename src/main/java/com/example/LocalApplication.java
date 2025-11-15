@@ -181,7 +181,7 @@ public class LocalApplication {
     }
 
     private static void sendTaskToManager(AWS aws, String inputS3Url, String doneQueueName, int n) {
-        String queueUrl = aws.getQueueUrl(AWS.INPUT_QUEUE_NAME);
+        String queueUrl;
         try {
             queueUrl = aws.getQueueUrl(AWS.INPUT_QUEUE_NAME);
         } catch (QueueDoesNotExistException e) {
@@ -232,6 +232,12 @@ public class LocalApplication {
         int firstSlash = s3UrlStripped.indexOf('/');
         String bucket = s3UrlStripped.substring(0, firstSlash);
         String key = s3UrlStripped.substring(firstSlash + 1);
+
+        // Delete existing file if it exists (so we can overwrite)
+        File outputFile = new File(outputFileName);
+        if (outputFile.exists()) {
+            outputFile.delete();
+        }
 
         aws.getS3Client().getObject(
                 GetObjectRequest.builder()

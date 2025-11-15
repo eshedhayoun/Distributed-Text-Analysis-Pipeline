@@ -1,0 +1,12 @@
+POS	https://www.gutenberg.org/files/11/11-0.txt
+CONSTITUENCY	https://www.gutenberg.org/files/11/11-0.txt
+DEPENDENCY	https://www.gutenberg.org/files/11/11-0.txt
+POS	https://www.gutenberg.org/files/1342/1342-0.txt
+CONSTITUENCY	https://www.gutenberg.org/files/1342/1342-0.txt
+DEPENDENCY	https://www.gutenberg.org/files/1342/1342-0.txt
+POS	https://www.gutenberg.org/files/84/84-0.txt
+CONSTITUENCY	https://www.gutenberg.org/files/84/84-0.txt
+DEPENDENCY	https://www.gutenberg.org/files/84/84-0.txt
+POS	https://www.gutenberg.org/files/98/98-0.txt
+CONSTITUENCY	https://www.gutenberg.org/files/98/98-0.txt
+DEPENDENCY	https://www.gutenberg.org/files/98/98-0.txt
