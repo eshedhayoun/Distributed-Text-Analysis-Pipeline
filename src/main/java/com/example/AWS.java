@@ -25,10 +25,10 @@ public final class AWS {
     private static final Region REGION = Region.US_EAST_1;
 
     // IMPORTANT: Make this globally unique!
-    public static final String S3_BUCKET_NAME = "input-files-bucket";
+    public static final String S3_BUCKET_NAME = "distributed-text-analysis-pipeline-inputs-us-east-1";
 
     // IMPORTANT: Replace with your AMI ID
-    public static final String AMI_ID = "ami-0cae6d6fe6048ca2c";
+    public static final String AMI_ID = "ami-0ecb62995f68bb549";
 
     // ======================================================================
 
@@ -38,7 +38,7 @@ public final class AWS {
     public static final String RESULT_QUEUE_NAME = "Manager_Results_Queue";
 
     // EC2 Configuration
-    public static final String INSTANCE_TYPE = "t2.micro";
+    public static final String INSTANCE_TYPE = "t3.micro";
     public static final int MAX_INSTANCES = 19;
 
     // EC2 Tags
