@@ -2,104 +2,234 @@ package com.example;
 
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.ec2.Ec2Client;
-import software.amazon.awssdk.services.ec2.model.Tag;
 import software.amazon.awssdk.services.ec2.model.*;
+import software.amazon.awssdk.services.ec2.model.Tag;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
 import software.amazon.awssdk.services.sqs.SqsClient;
-import software.amazon.awssdk.services.sqs.model.CreateQueueRequest;
+import software.amazon.awssdk.services.sqs.model.*;
 
-import java.util.Base64;
+import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
 
-public class AWS {
-    private final S3Client s3;
-    private final SqsClient sqs;
-    private final Ec2Client ec2;
+/**
+ * AWS utility singleton - provides AWS service clients and simple helper methods.
+ * This is a TOOL for LocalApplication, Manager, and Worker to use.
+ * Contains NO business logic - just makes AWS operations easier.
+ */
+public final class AWS {
 
-    public static String ami = "ami-00e95a9222311e8ed";
+    // ==================== CONFIGURATION - UPDATE THESE ====================
 
-    public static Region region1 = Region.US_WEST_2;
-    public static Region region2 = Region.US_EAST_1;
+    private static final Region REGION = Region.US_EAST_1;
+
+    // IMPORTANT: Make this globally unique!
+    public static final String S3_BUCKET_NAME = "input-files-bucket";
+
+    // IMPORTANT: Replace with your AMI ID
+    public static final String AMI_ID = "ami-0cae6d6fe6048ca2c";
+
+    // ======================================================================
+
+    // Queue Names
+    public static final String INPUT_QUEUE_NAME = "Client_Manager_Queue";
+    public static final String TASK_QUEUE_NAME = "Manager_Worker_TaskQueue";
+    public static final String RESULT_QUEUE_NAME = "Manager_Results_Queue";
+
+    // EC2 Configuration
+    public static final String INSTANCE_TYPE = "t2.micro";
+    public static final int MAX_INSTANCES = 19;
+
+    // EC2 Tags
+    public static final String INSTANCE_TAG_KEY = "Type";
+    public static final String MANAGER_TAG_VALUE = "Manager";
+    public static final String WORKER_TAG_VALUE = "Worker";
+
+    // S3 JAR Paths
+    public static final String MANAGER_JAR_KEY = "jars/Manager.jar";
+    public static final String WORKER_JAR_KEY = "jars/Worker.jar";
+    public static final String STANFORD_JAR_KEY = "jars/stanford-corenlp-4.5.1.jar";
+
+    // AWS Clients
+    private final S3Client s3Client;
+    private final SqsClient sqsClient;
+    private final Ec2Client ec2Client;
 
     private static final AWS instance = new AWS();
 
     private AWS() {
-        s3 = S3Client.builder().region(region1).build();
-        sqs = SqsClient.builder().region(region1).build();
-        ec2 = Ec2Client.builder().region(region2).build();
+        this.s3Client = S3Client.builder().region(REGION).build();
+        this.sqsClient = SqsClient.builder().region(REGION).build();
+        this.ec2Client = Ec2Client.builder().region(REGION).build();
     }
 
     public static AWS getInstance() {
         return instance;
     }
 
-    public String bucketName = "only-together2";
+    // ==================== CLIENT GETTERS ====================
 
+    public S3Client getS3Client() {
+        return s3Client;
+    }
 
-    // S3
+    public SqsClient getSqsClient() {
+        return sqsClient;
+    }
+
+    public Ec2Client getEc2Client() {
+        return ec2Client;
+    }
+
+    public Region getRegion() {
+        return REGION;
+    }
+
+    // ==================== S3 HELPERS ====================
+
+    /**
+     * Creates S3 bucket if it doesn't exist.
+     */
     public void createBucketIfNotExists(String bucketName) {
         try {
-            s3.createBucket(CreateBucketRequest
-                    .builder()
+            s3Client.createBucket(CreateBucketRequest.builder()
                     .bucket(bucketName)
-                    .createBucketConfiguration(
-                            CreateBucketConfiguration.builder()
-                                    .locationConstraint(BucketLocationConstraint.US_WEST_2)
-                                    .build())
                     .build());
-            s3.waiter().waitUntilBucketExists(HeadBucketRequest.builder()
+            s3Client.waiter().waitUntilBucketExists(HeadBucketRequest.builder()
                     .bucket(bucketName)
                     .build());
         } catch (S3Exception e) {
-            System.out.println(e.getMessage());
+            if (!e.awsErrorDetails().errorCode().contains("BucketAlready")) {
+                throw e;
+            }
         }
     }
 
-    // EC2
-    public String createEC2(String script, String tagName, int numberOfInstances) {
-        Ec2Client ec2 = Ec2Client.builder().region(region2).build();
-        RunInstancesRequest runRequest = (RunInstancesRequest) RunInstancesRequest.builder()
-                .instanceType(InstanceType.M4_LARGE)
-                .imageId(ami)
-                .maxCount(numberOfInstances)
-                .minCount(1)
-                .keyName("vockey")
-                .iamInstanceProfile(IamInstanceProfileSpecification.builder().name("LabInstanceProfile").build())
-                .userData(Base64.getEncoder().encodeToString((script).getBytes()))
-                .build();
+    // ==================== SQS HELPERS ====================
 
-
-        RunInstancesResponse response = ec2.runInstances(runRequest);
-
-        String instanceId = response.instances().get(0).instanceId();
-
-        software.amazon.awssdk.services.ec2.model.Tag tag = Tag.builder()
-                .key("Name")
-                .value(tagName)
-                .build();
-
-        CreateTagsRequest tagRequest = (CreateTagsRequest) CreateTagsRequest.builder()
-                .resources(instanceId)
-                .tags(tag)
-                .build();
-
+    /**
+     * Creates a queue, returns URL. If queue exists, returns existing URL.
+     */
+    public String createQueue(String queueName) {
         try {
-            ec2.createTags(tagRequest);
-            System.out.printf(
-                    "[DEBUG] Successfully started EC2 instance %s based on AMI %s\n",
-                    instanceId, ami);
-
-        } catch (Ec2Exception e) {
-            System.err.println("[ERROR] " + e.getMessage());
-            System.exit(1);
+            return sqsClient.createQueue(CreateQueueRequest.builder()
+                    .queueName(queueName)
+                    .build()).queueUrl();
+        } catch (QueueNameExistsException e) {
+            return getQueueUrl(queueName);
         }
-        return instanceId;
     }
 
-    public void createSqsQueue(String queueName) {
-        CreateQueueRequest createQueueRequest = CreateQueueRequest.builder()
+    /**
+     * Gets URL of existing queue.
+     */
+    public String getQueueUrl(String queueName) {
+        return sqsClient.getQueueUrl(GetQueueUrlRequest.builder()
                 .queueName(queueName)
+                .build()).queueUrl();
+    }
+
+    /**
+     * Deletes a queue by URL.
+     */
+    public void deleteQueue(String queueUrl) {
+        sqsClient.deleteQueue(DeleteQueueRequest.builder()
+                .queueUrl(queueUrl)
+                .build());
+    }
+
+    // ==================== EC2 HELPERS ====================
+
+    /**
+     * Launches EC2 instances with specified configuration.
+     * Returns list of instance IDs.
+     */
+    public List<String> launchInstances(int count, String userData, String tagValue) {
+        RunInstancesResponse response = ec2Client.runInstances(
+                RunInstancesRequest.builder()
+                        .imageId(AMI_ID)
+                        .instanceType(InstanceType.fromValue(INSTANCE_TYPE))
+                        .minCount(count)
+                        .maxCount(count)
+                        .userData(userData)
+                        .tagSpecifications(TagSpecification.builder()
+                                .resourceType(ResourceType.INSTANCE)
+                                .tags(Tag.builder()
+                                        .key(INSTANCE_TAG_KEY)
+                                        .value(tagValue)
+                                        .build())
+                                .build())
+                        .build());
+
+        return response.instances().stream()
+                .map(Instance::instanceId)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Finds instances by tag value and state.
+     */
+    public List<Instance> findInstancesByTag(String tagValue, InstanceStateName... states) {
+        Filter tagFilter = Filter.builder()
+                .name("tag:" + INSTANCE_TAG_KEY)
+                .values(tagValue)
                 .build();
-        sqs.createQueue(createQueueRequest);
+
+        String[] stateStrings = Arrays.stream(states)
+                .map(InstanceStateName::toString)
+                .toArray(String[]::new);
+
+        Filter stateFilter = Filter.builder()
+                .name("instance-state-name")
+                .values(stateStrings)
+                .build();
+
+        DescribeInstancesResponse response = ec2Client.describeInstances(
+                DescribeInstancesRequest.builder()
+                        .filters(tagFilter, stateFilter)
+                        .build());
+
+        return response.reservations().stream()
+                .flatMap(r -> r.instances().stream())
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Terminates EC2 instances by IDs.
+     */
+    public void terminateInstances(List<String> instanceIds) {
+        if (instanceIds == null || instanceIds.isEmpty()) return;
+
+        ec2Client.terminateInstances(TerminateInstancesRequest.builder()
+                .instanceIds(instanceIds)
+                .build());
+    }
+
+    /**
+     * Gets current instance ID from EC2 metadata (only works when running ON EC2).
+     */
+    public String getCurrentInstanceId() {
+        try {
+            java.net.URL url = new java.net.URL("http://169.254.169.254/latest/meta-data/instance-id");
+            java.net.URLConnection conn = url.openConnection();
+            conn.setConnectTimeout(2000);
+            conn.setReadTimeout(2000);
+
+            try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(conn.getInputStream()))) {
+                return reader.readLine();
+            }
+        } catch (Exception e) {
+            return null; // Not running on EC2
+        }
+    }
+
+    // ==================== CLEANUP ====================
+
+    public void close() {
+        if (s3Client != null) s3Client.close();
+        if (sqsClient != null) sqsClient.close();
+        if (ec2Client != null) ec2Client.close();
     }
 }
