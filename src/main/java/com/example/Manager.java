@@ -24,7 +24,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class Manager {
 
     // --- Configuration Constants ---
-    private static final Region REGION = Region.EU_WEST_1;
+    private static final Region REGION = Region.EU_WEST_2;
     private static final String S3_BUCKET_NAME = "your-unique-bucket-name-here";
     private static final String INPUT_QUEUE_NAME = "Client_Manager_Queue";
     private static final String TASK_QUEUE_NAME = "Manager_Worker_TaskQueue";

@@ -23,8 +23,8 @@ import java.util.Base64;
 public class LocalApplication {
 
     // --- Configuration Constants ---
-    private static final Region REGION = Region.EU_WEST_1;
-    private static final String S3_BUCKET_NAME = "your-unique-bucket-name-here";
+    private static final Region REGION = Region.EU_WEST_2;
+    private static final String S3_BUCKET_NAME = "my-s3-bucket";
     private static final String INPUT_QUEUE_NAME = "Client_Manager_Queue";
     private static final String INSTANCE_TAG_KEY = "Type";
     private static final String MANAGER_TAG_VALUE = "Manager";

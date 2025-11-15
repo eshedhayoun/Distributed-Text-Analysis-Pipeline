@@ -28,7 +28,7 @@ import java.util.concurrent.TimeUnit;
 public class Worker {
 
     // --- Configuration Constants ---
-    private static final Region REGION = Region.EU_WEST_1;
+    private static final Region REGION = Region.EU_WEST_2;
     private static final String S3_BUCKET_NAME = "your-unique-bucket-name-here";
     private static final int MAX_TEXT_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB limit for safety
     private static final int DOWNLOAD_TIMEOUT_MS = 60000; // 1 minute timeout for downloads
