@@ -2,27 +2,23 @@
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
-
-    <groupId>com.yourname.cloudnlp</groupId>
+    <groupId>com.example</groupId>
     <artifactId>distributed-text-analysis-pipeline</artifactId>
     <version>1.0-SNAPSHOT</version>
-
     <properties>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
-
-    <!-- CRITICAL FIX: Add the Stanford repository to resolve CoreNLP dependency -->
+    
     <repositories>
         <repository>
             <id>stanford-corenlp</id>
             <url>https://oss.sonatype.org/content/repositories/releases/</url>
         </repository>
     </repositories>
-
+    
     <dependencies>
-        <!-- AWS SDK for Cloud Services -->
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>ec2</artifactId>
@@ -38,36 +34,46 @@
             <artifactId>sqs</artifactId>
             <version>2.28.18</version>
         </dependency>
-
-        <!-- CRITICAL FIX: Dependency for the main Stanford CoreNLP classes (StanfordCoreNLP, Document, Sentence) -->
         <dependency>
             <groupId>edu.stanford.nlp</groupId>
             <artifactId>stanford-corenlp</artifactId>
             <version>3.6.0</version>
         </dependency>
-
-        <!-- Existing dependency for the parser models/library -->
         <dependency>
             <groupId>edu.stanford.nlp</groupId>
             <artifactId>stanford-parser</artifactId>
             <version>3.6.0</version>
         </dependency>
     </dependencies>
-
+    
     <build>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.11.0</version>
-                <configuration>
-                    <!-- Using release 17 is technically better but keeping source/target as requested -->
-                    <source>${maven.compiler.source}</source>
-                    <target>${maven.compiler.target}</target>
-                    <encoding>UTF-8</encoding>
-                </configuration>
             </plugin>
-
+            
+            <!-- Copy dependencies to lib folder -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <version>3.6.0</version>
+                <executions>
+                    <execution>
+                        <id>copy-dependencies</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy-dependencies</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/lib</outputDirectory>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            
+            <!-- Create JAR with classpath reference to lib -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
@@ -77,6 +83,7 @@
                         <manifest>
                             <addClasspath>true</addClasspath>
                             <classpathPrefix>lib/</classpathPrefix>
+                            <mainClass>com.example.LocalApplication</mainClass>
                         </manifest>
                     </archive>
                 </configuration>

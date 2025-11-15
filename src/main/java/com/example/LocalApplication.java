@@ -42,15 +42,16 @@ public class LocalApplication {
 
         boolean terminateMode = args.length == 4 && args[3].equalsIgnoreCase("terminate");
 
-        String clientId = UUID.randomUUID().toString();
-        String doneQueueName = "DoneQueue-" + clientId;
+        // Unique job ID for THIS specific job
+        String jobId = UUID.randomUUID().toString();
+        String doneQueueName = "DoneQueue-" + jobId;
         String doneQueueUrl = null;
 
         AWS aws = AWS.getInstance();
 
         try {
             System.out.println("=== Starting Local Application ===");
-            System.out.println("Client ID: " + clientId);
+            System.out.println("Job ID: " + jobId);
             System.out.println("Terminate mode: " + terminateMode);
 
             // 0. Ensure S3 bucket exists
@@ -60,19 +61,19 @@ public class LocalApplication {
             // 1. Check if Manager is running, if not - launch it
             ensureManagerIsRunning(aws);
 
-            // 2. Create unique done queue BEFORE sending task
+            // 2. Create unique done queue for THIS job BEFORE sending task
             doneQueueUrl = aws.createQueue(doneQueueName);
-            System.out.println("✅ Created done queue: " + doneQueueName);
+            System.out.println("✅ Created done queue for this job: " + doneQueueName);
 
-            // 3. Upload input file to S3
-            String s3Key = "input/" + clientId + "/" + new File(inputFilePath).getName();
+            // 3. Upload input file to S3 (unique per job)
+            String s3Key = "input/" + jobId + "/" + new File(inputFilePath).getName();
             String inputS3Url = uploadFileToS3(aws, inputFilePath, s3Key);
 
             // 4. Send task message to Manager
             sendTaskToManager(aws, inputS3Url, doneQueueName, n);
 
-            // 5. Wait for job completion and get results
-            String summaryS3Url = waitForCompletion(aws, doneQueueUrl);
+            // 5. Wait for THIS job completion
+            String summaryS3Url = waitForCompletion(aws, doneQueueUrl, jobId);
 
             if (summaryS3Url != null) {
                 // 6. Download summary file
@@ -82,7 +83,7 @@ public class LocalApplication {
                 System.err.println("❌ Failed to receive completion message.");
             }
 
-            // 7. If terminate mode, send termination message AFTER getting results
+            // 7. If terminate mode, send termination AFTER this job completes
             if (terminateMode) {
                 sendTerminationMessage(aws);
                 System.out.println("✅ Termination message sent to Manager.");
@@ -94,34 +95,31 @@ public class LocalApplication {
             System.err.println("Error: " + e.getMessage());
             e.printStackTrace();
         } finally {
-            // CRITICAL: Delete done queue
+            // CRITICAL: Always clean up THIS job's done queue
             if (doneQueueUrl != null) {
-                System.out.println("🧹 Cleaning up done queue...");
+                System.out.println("🧹 Cleaning up job resources...");
                 try {
                     aws.deleteQueue(doneQueueUrl);
-                    System.out.println("✅ Done queue deleted.");
+                    System.out.println("✅ Job queue deleted: " + doneQueueName);
                 } catch (Exception e) {
-                    System.err.println("Error deleting queue: " + e.getMessage());
+                    System.err.println("Error deleting job queue: " + e.getMessage());
                 }
             }
         }
     }
 
     private static void ensureManagerIsRunning(AWS aws) throws InterruptedException {
-        // Check if Manager instance exists
         List<Instance> managers = aws.findInstancesByTag(AWS.MANAGER_TAG_VALUE,
                 InstanceStateName.RUNNING);
 
         if (!managers.isEmpty()) {
             System.out.println("✅ Manager instance found.");
-            // Wait for Manager's queue to be ready
             if (waitForManagerQueue(aws)) {
                 System.out.println("✅ Manager is ready.");
                 return;
             }
         }
 
-        // No manager found or not ready - launch new one
         System.out.println("❌ Manager not found. Launching...");
         launchManager(aws);
 
@@ -144,7 +142,6 @@ public class LocalApplication {
         );
 
         String userData = Base64.getEncoder().encodeToString(startupScript.getBytes());
-
         List<String> instanceIds = aws.launchInstances(1, userData, AWS.MANAGER_TAG_VALUE);
         System.out.println("✅ Manager launched: " + instanceIds.get(0));
     }
@@ -195,8 +192,9 @@ public class LocalApplication {
         System.out.println("✅ Task sent to Manager.");
     }
 
-    private static String waitForCompletion(AWS aws, String doneQueueUrl) throws InterruptedException {
-        System.out.println("⏳ Waiting for completion...");
+    private static String waitForCompletion(AWS aws, String doneQueueUrl, String jobId)
+            throws InterruptedException {
+        System.out.println("⏳ Waiting for job " + jobId + " completion...");
 
         while (true) {
             ReceiveMessageResponse response = aws.getSqsClient().receiveMessage(
@@ -211,13 +209,12 @@ public class LocalApplication {
                 Message message = messages.get(0);
                 String summaryS3Url = message.body();
 
-                // Delete message
                 aws.getSqsClient().deleteMessage(DeleteMessageRequest.builder()
                         .queueUrl(doneQueueUrl)
                         .receiptHandle(message.receiptHandle())
                         .build());
 
-                System.out.println("✅ Completion message received!");
+                System.out.println("✅ Job " + jobId + " completion message received!");
                 return summaryS3Url;
             } else {
                 System.out.print(".");
@@ -226,7 +223,6 @@ public class LocalApplication {
     }
 
     private static void downloadSummaryFile(AWS aws, String s3Url, String outputFileName) {
-        // Parse s3://bucket/key
         String s3UrlStripped = s3Url.substring(5);
         int firstSlash = s3UrlStripped.indexOf('/');
         String bucket = s3UrlStripped.substring(0, firstSlash);

@@ -47,8 +47,8 @@ public final class AWS {
     public static final String WORKER_TAG_VALUE = "Worker";
 
     // S3 JAR Paths
-    public static final String MANAGER_JAR_KEY = "jars/Manager.jar";
-    public static final String WORKER_JAR_KEY = "jars/Worker.jar";
+    public static final String MANAGER_JAR_KEY = "jars/distributed-text-analysis-pipeline-1.0-SNAPSHOT.jar";
+    public static final String WORKER_JAR_KEY = "jars/distributed-text-analysis-pipeline-1.0-SNAPSHOT.jar";
     public static final String STANFORD_JAR_KEY = "jars/stanford-corenlp-4.5.1.jar";
 
     // AWS Clients

@@ -15,6 +15,7 @@ import java.util.stream.Collectors;
 public class Manager {
 
     private static volatile boolean terminationReceived = false;
+    private static volatile boolean resultMonitorStarted = false;
     private static final ConcurrentHashMap<String, Integer> submittedTaskCounts = new ConcurrentHashMap<>();
     private static final AtomicInteger totalPendingTasks = new AtomicInteger(0);
     private static final ConcurrentHashMap<String, String> activeWorkerIds = new ConcurrentHashMap<>();
@@ -31,19 +32,22 @@ public class Manager {
             String taskQueueUrl = aws.createQueue(AWS.TASK_QUEUE_NAME);
             String resultQueueUrl = aws.createQueue(AWS.RESULT_QUEUE_NAME);
 
-            // Set visibility timeout for task queue (fault tolerance)
+            // Set visibility timeout for task queue
             aws.getSqsClient().setQueueAttributes(SetQueueAttributesRequest.builder()
                     .queueUrl(taskQueueUrl)
                     .attributes(Map.of(QueueAttributeName.VISIBILITY_TIMEOUT, "600"))
                     .build());
-            System.out.println("✅ Task queue visibility timeout set to 600 seconds.");
+            System.out.println("✅ Task queue visibility timeout set.");
 
             // Discover existing workers
             discoverExistingWorkers(aws);
             System.out.println("Found " + activeWorkerIds.size() + " existing workers.");
 
-            // Start result monitoring thread
-            executor.submit(new ResultMonitor(aws, resultQueueUrl));
+            // Start result monitoring thread (ONLY ONCE)
+            if (!resultMonitorStarted) {
+                executor.submit(new ResultMonitor(aws, resultQueueUrl));
+                resultMonitorStarted = true;
+            }
 
             System.out.println("Manager ready. Polling for tasks...");
 
@@ -167,7 +171,7 @@ public class Manager {
     }
 
     private static void launchWorkers(AWS aws, int count) {
-        int activeInstances = activeWorkerIds.size() + 1; // +1 for Manager
+        int activeInstances = activeWorkerIds.size() + 1;
         int available = AWS.MAX_INSTANCES - activeInstances;
         int toLaunch = Math.min(count, available);
 
@@ -181,11 +185,9 @@ public class Manager {
                 "exec > >(tee /var/log/user-data.log) 2>&1",
                 "apt-get update -y",
                 "apt-get install -y default-jdk awscli",
-                "aws s3 cp s3://" + AWS.S3_BUCKET_NAME + "/" + AWS.STANFORD_JAR_KEY + " /home/ubuntu/stanford-corenlp.jar",
                 "aws s3 cp s3://" + AWS.S3_BUCKET_NAME + "/" + AWS.WORKER_JAR_KEY + " /home/ubuntu/Worker.jar",
                 "cd /home/ubuntu",
-                "nohup java -Xmx4g -cp stanford-corenlp.jar:Worker.jar com.example.Worker " +
-                        AWS.TASK_QUEUE_NAME + " " + AWS.RESULT_QUEUE_NAME + " > worker.log 2>&1 &",
+                "java -jar Worker.jar " + AWS.TASK_QUEUE_NAME + " " + AWS.RESULT_QUEUE_NAME + " > worker.log 2>&1 &",
                 "echo 'Worker started'"
         );
 
@@ -200,7 +202,7 @@ public class Manager {
     }
 
     private static List<String> parseInputFile(AWS aws, String s3Url) throws Exception {
-        String s3UrlStripped = s3Url.substring(5); // Remove "s3://"
+        String s3UrlStripped = s3Url.substring(5);
         int firstSlash = s3UrlStripped.indexOf('/');
         String bucket = s3UrlStripped.substring(0, firstSlash);
         String key = s3UrlStripped.substring(firstSlash + 1);
@@ -328,29 +330,55 @@ public class Manager {
     }
 
     private static void cleanupAndTerminate(AWS aws) {
-        System.out.println("\n=== Shutting down ===");
+        System.out.println("\n=== Manager Cleanup & Shutdown ===");
 
-        // Terminate workers
+        // 1. Terminate all workers
         if (!activeWorkerIds.isEmpty()) {
             List<String> workerIds = new ArrayList<>(activeWorkerIds.keySet());
             aws.terminateInstances(workerIds);
             System.out.println("✅ Workers terminated.");
         }
 
-        // Wait a bit
+        // 2. Delete shared queues (assignment: clean up resources)
+        System.out.println("🧹 Cleaning up Manager queues...");
+        try {
+            String inputQueueUrl = aws.getQueueUrl(AWS.INPUT_QUEUE_NAME);
+            aws.deleteQueue(inputQueueUrl);
+            System.out.println("✅ Input queue deleted.");
+        } catch (Exception e) {
+            System.err.println("Note: Input queue cleanup: " + e.getMessage());
+        }
+
+        try {
+            String taskQueueUrl = aws.getQueueUrl(AWS.TASK_QUEUE_NAME);
+            aws.deleteQueue(taskQueueUrl);
+            System.out.println("✅ Task queue deleted.");
+        } catch (Exception e) {
+            System.err.println("Note: Task queue cleanup: " + e.getMessage());
+        }
+
+        try {
+            String resultQueueUrl = aws.getQueueUrl(AWS.RESULT_QUEUE_NAME);
+            aws.deleteQueue(resultQueueUrl);
+            System.out.println("✅ Result queue deleted.");
+        } catch (Exception e) {
+            System.err.println("Note: Result queue cleanup: " + e.getMessage());
+        }
+
+        // 3. Wait briefly for cleanup
         try {
             TimeUnit.SECONDS.sleep(5);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
 
-        // Self-terminate
+        // 4. Self-terminate
         String managerId = aws.getCurrentInstanceId();
         if (managerId != null) {
             aws.terminateInstances(List.of(managerId));
             System.out.println("✅ Manager self-terminated.");
         } else {
-            System.out.println("⚠️  Could not get instance ID. Manual cleanup needed.");
+            System.out.println("⚠️  Could not get instance ID. Manual cleanup may be needed.");
         }
     }
 }
