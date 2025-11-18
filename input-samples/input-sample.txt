@@ -1,0 +1,10 @@
+POS	https://www.gutenberg.org/files/1659/1659-0.txt
+CONSTITUENCY	https://www.gutenberg.org/files/1659/1659-0.txt
+DEPENDENCY	https://www.gutenberg.org/files/1659/1659-0.txt
+POS	https://www.gutenberg.org/files/1660/1660-0.txt
+CONSTITUENCY	https://www.gutenberg.org/files/1660/1660-0.txt
+DEPENDENCY	https://www.gutenberg.org/files/1660/1660-0.txt
+POS	https://www.gutenberg.org/files/1661/1661-0.txt
+CONSTITUENCY	https://www.gutenberg.org/files/1661/1661-0.txt
+DEPENDENCY	https://www.gutenberg.org/files/1661/1661-0.txt
+
