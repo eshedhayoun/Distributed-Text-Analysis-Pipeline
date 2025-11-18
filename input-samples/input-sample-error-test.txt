@@ -1,0 +1,4 @@
+POS	https://www.gutenberg.org/files/1342/1342-0.txt
+DEPENDENCY	https://www.gutenberg.org/files/99999/99999-0.txt
+CONSTITUENCY	https://www.example.com/nonexistent.txt
+POS	https://www.gutenberg.org/files/84/84-0.txt

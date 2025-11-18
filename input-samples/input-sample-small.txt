@@ -1,0 +1,3 @@
+POS	https://www.gutenberg.org/files/1342/1342-0.txt
+CONSTITUENCY	https://www.gutenberg.org/files/1342/1342-0.txt
+DEPENDENCY	https://www.gutenberg.org/files/1342/1342-0.txt

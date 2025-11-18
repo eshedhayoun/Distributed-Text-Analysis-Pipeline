@@ -1,39 +1,22 @@
 package com.example;
 
-import software.amazon.awssdk.regions.Region;
-import software.amazon.awssdk.services.ec2.Ec2Client;
 import software.amazon.awssdk.services.ec2.model.*;
-import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.*;
-import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.model.PutObjectRequest;
-import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.*;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.core.sync.ResponseTransformer;
-import software.amazon.awssdk.services.s3.model.S3Exception;
 
 import java.io.File;
 import java.nio.file.Paths;
-import java.util.Optional;
-import java.util.UUID;
-import java.util.List;
-import java.util.concurrent.TimeUnit;
 import java.util.Base64;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 public class LocalApplication {
 
-    // --- Configuration Constants ---
-    private static final Region REGION = Region.EU_WEST_1;
-    private static final String S3_BUCKET_NAME = "your-unique-bucket-name-here";
-    private static final String INPUT_QUEUE_NAME = "Client_Manager_Queue";
-    private static final String INSTANCE_TAG_KEY = "Type";
-    private static final String MANAGER_TAG_VALUE = "Manager";
-    private static final String AMI_ID = "ami-xxxxxxxxxxxxxxxxx"; // Replace with your configured AMI ID
-    private static final String INSTANCE_TYPE = InstanceType.T2_MICRO.toString();
     private static final int MAX_MANAGER_WAIT_SECONDS = 120;
     private static final int QUEUE_CHECK_INTERVAL_SECONDS = 5;
-
-    private static final String MANAGER_JAR_KEY = "jars/Manager.jar";
 
     public static void main(String[] args) {
         if (args.length < 3 || args.length > 4) {
@@ -59,291 +42,201 @@ public class LocalApplication {
 
         boolean terminateMode = args.length == 4 && args[3].equalsIgnoreCase("terminate");
 
-        String clientId = UUID.randomUUID().toString();
-        String doneQueueName = "DoneQueue-" + clientId;
-        boolean queueCreated = false;
+        // Unique job ID for THIS specific job
+        String jobId = UUID.randomUUID().toString();
+        String doneQueueName = "DoneQueue-" + jobId;
+        String doneQueueUrl = null;
 
-        try (Ec2Client ec2 = Ec2Client.builder().region(REGION).build();
-             SqsClient sqs = SqsClient.builder().region(REGION).build();
-             S3Client s3 = S3Client.builder().region(REGION).build()) {
+        AWS aws = AWS.getInstance();
 
+        try {
             System.out.println("=== Starting Local Application ===");
-            System.out.println("Client ID: " + clientId);
+            System.out.println("Job ID: " + jobId);
             System.out.println("Terminate mode: " + terminateMode);
 
-            try {
-                // 1. Check if Manager is running, if not - launch it
-                ensureManagerIsRunning(ec2, sqs);
+            // 0. Ensure S3 bucket exists
+            aws.createBucketIfNotExists(AWS.S3_BUCKET_NAME);
+            System.out.println("✅ S3 Bucket ready: " + AWS.S3_BUCKET_NAME);
 
-                // 2. Create unique done queue BEFORE sending task (CRITICAL!)
-                createDoneQueue(sqs, doneQueueName);
-                queueCreated = true; // Mark that we successfully created the queue
+            // 1. Check if Manager is running, if not - launch it
+            ensureManagerIsRunning(aws);
 
-                // 3. Upload input file to S3
-                String s3Key = "input/" + clientId + "/" + new File(inputFilePath).getName();
-                String inputS3Url = String.format("s3://%s/%s", S3_BUCKET_NAME, s3Key);
-                uploadFileToS3(s3, inputFilePath, S3_BUCKET_NAME, s3Key);
+            // 2. Create unique done queue for THIS job BEFORE sending task
+            doneQueueUrl = aws.createQueue(doneQueueName);
+            System.out.println("✅ Created done queue for this job: " + doneQueueName);
 
-                // 4. Send task message to Manager
-                sendInitialTaskMessage(sqs, inputS3Url, doneQueueName, n);
+            // 3. Upload input file to S3 (unique per job)
+            String s3Key = "input/" + jobId + "/" + new File(inputFilePath).getName();
+            String inputS3Url = uploadFileToS3(aws, inputFilePath, s3Key);
 
-                // 5. Wait for job completion and get results (ALWAYS, even in terminate mode!)
-                String summaryS3Url = waitForDoneMessageAndGetSummaryUrl(sqs, doneQueueName);
+            // 4. Send task message to Manager
+            sendTaskToManager(aws, inputS3Url, doneQueueName, n);
 
-                if (summaryS3Url != null) {
-                    // 6. Download summary file
-                    downloadSummaryFile(s3, summaryS3Url, outputFileName);
-                    System.out.println("✅ Job completed successfully!");
-                } else {
-                    System.err.println("❌ Failed to receive completion message from Manager.");
-                }
+            // 5. Wait for THIS job completion
+            String summaryS3Url = waitForCompletion(aws, doneQueueUrl, jobId);
 
-                // 7. If terminate mode, send termination message AFTER getting results
-                if (terminateMode) {
-                    sendTerminationMessage(sqs);
-                    System.out.println("✅ Termination message sent to Manager.");
-                }
-
-                System.out.println("=== Local Application finished ===");
-
-            } finally {
-                // CRITICAL CLEANUP: Delete done queue if it was created
-                // This MUST happen regardless of success, failure, or termination
-                if (queueCreated) {
-                    System.out.println("🧹 Cleaning up resources...");
-                    deleteQueue(sqs, doneQueueName);
-                }
+            if (summaryS3Url != null) {
+                // 6. Download summary file
+                downloadSummaryFile(aws, summaryS3Url, outputFileName);
+                System.out.println("✅ Job completed successfully!");
+            } else {
+                System.err.println("❌ Failed to receive completion message.");
             }
 
-        } catch (SqsException | S3Exception e) {
-            System.err.println("AWS Service Error: " + e.getMessage());
-            e.printStackTrace();
-        } catch (InterruptedException e) {
-            System.err.println("Process interrupted.");
-            Thread.currentThread().interrupt();
+            // 7. If terminate mode, send termination AFTER this job completes
+            if (terminateMode) {
+                sendTerminationMessage(aws);
+                System.out.println("✅ Termination message sent to Manager.");
+            }
+
+            System.out.println("=== Local Application finished ===");
+
         } catch (Exception e) {
-            System.err.println("Unexpected error: " + e.getMessage());
+            System.err.println("Error: " + e.getMessage());
             e.printStackTrace();
+        } finally {
+            // CRITICAL: Always clean up THIS job's done queue
+            if (doneQueueUrl != null) {
+                System.out.println("🧹 Cleaning up job resources...");
+                try {
+                    aws.deleteQueue(doneQueueUrl);
+                    System.out.println("✅ Job queue deleted: " + doneQueueName);
+                } catch (Exception e) {
+                    System.err.println("Error deleting job queue: " + e.getMessage());
+                }
+            }
         }
     }
 
-    /**
-     * Ensures Manager is running. Returns true if Manager was launched by this call.
-     * Optimized to check queue existence instead of blind waiting.
-     */
-    private static boolean ensureManagerIsRunning(Ec2Client ec2, SqsClient sqs) throws InterruptedException {
-        Optional<Instance> managerInstance = findManagerInstance(ec2);
+    private static void ensureManagerIsRunning(AWS aws) throws InterruptedException {
+        List<Instance> managers = aws.findInstancesByTag(AWS.MANAGER_TAG_VALUE,
+                InstanceStateName.RUNNING);
 
-        if (managerInstance.isPresent()) {
-            System.out.println("✅ Manager instance is already running.");
-            // Manager exists, but is its queue ready?
-            if (waitForManagerQueue(sqs)) {
-                System.out.println("✅ Manager queue is ready.");
-                return false;
+        if (!managers.isEmpty()) {
+            System.out.println("✅ Manager instance found.");
+            if (waitForManagerQueue(aws)) {
+                System.out.println("✅ Manager is ready.");
+                return;
             }
         }
 
-        // Manager not found or queue not ready - launch new manager
-        System.out.println("❌ Manager not found or not ready. Launching new instance...");
-        runManagerInstance(ec2, MANAGER_JAR_KEY);
+        System.out.println("❌ Manager not found. Launching...");
+        launchManager(aws);
 
-        // Wait for Manager to initialize and create its queue
         System.out.println("⏳ Waiting for Manager to initialize...");
-        if (!waitForManagerQueue(sqs)) {
-            System.err.println("⚠️  Manager queue not detected within timeout. Proceeding anyway...");
+        if (!waitForManagerQueue(aws)) {
+            System.err.println("⚠️  Manager queue not detected. Proceeding anyway...");
         }
-
-        return true;
     }
 
-    /**
-     * Waits for Manager's input queue to exist (indicates Manager is ready).
-     * Returns true if queue found, false if timeout.
-     */
-    private static boolean waitForManagerQueue(SqsClient sqs) throws InterruptedException {
-        int totalWaitTime = 0;
+    private static void launchManager(AWS aws) {
+        String startupScript = String.join("\n",
+                "#!/bin/bash",
+                "exec > >(tee /var/log/user-data.log) 2>&1",
+                "echo 'Starting Manager setup...'",
+                "apt-get update -y",
+                "apt-get install -y default-jdk unzip curl",
+                "echo 'Installing AWS CLI...'",
+                "cd /tmp",
+                "curl 'https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip' -o 'awscliv2.zip'",
+                "unzip -q awscliv2.zip",
+                "./aws/install",
+                "echo 'AWS CLI installed'",
+                "cd /home/ubuntu",
+                "echo 'Downloading Manager JAR...'",
+                "/usr/local/bin/aws s3 cp s3://" + AWS.S3_BUCKET_NAME + "/" + AWS.MANAGER_JAR_KEY + " Manager.jar",
+                "echo 'Downloading lib folder...'",
+                "/usr/local/bin/aws s3 cp s3://" + AWS.S3_BUCKET_NAME + "/jars/lib/ lib/ --recursive",
+                "ls -lh Manager.jar",
+                "ls -lh lib/ | head -5",
+                "echo 'Starting Manager Java process...'",
+                "java -version",
+                "java -cp Manager.jar:lib/* com.example.Manager > manager.log 2>&1 &",                "sleep 5",
+                "ps aux | grep java",
+                "echo '=== Manager log ==='",
+                "cat manager.log",
+                "echo 'Manager startup complete'"
+        );
 
-        while (totalWaitTime < MAX_MANAGER_WAIT_SECONDS) {
+        String userData = Base64.getEncoder().encodeToString(startupScript.getBytes());
+        List<String> instanceIds = aws.launchInstances(1, userData, AWS.MANAGER_TAG_VALUE);
+        System.out.println("✅ Manager launched: " + instanceIds.get(0));
+    }
+
+    private static boolean waitForManagerQueue(AWS aws) throws InterruptedException {
+        int totalWait = 0;
+        while (totalWait < MAX_MANAGER_WAIT_SECONDS) {
             try {
-                sqs.getQueueUrl(GetQueueUrlRequest.builder()
-                        .queueName(INPUT_QUEUE_NAME)
-                        .build());
-                System.out.println("✅ Manager input queue detected!");
+                aws.getQueueUrl(AWS.INPUT_QUEUE_NAME);
+                System.out.println("✅ Manager queue detected!");
                 return true;
             } catch (QueueDoesNotExistException e) {
                 System.out.print(".");
                 TimeUnit.SECONDS.sleep(QUEUE_CHECK_INTERVAL_SECONDS);
-                totalWaitTime += QUEUE_CHECK_INTERVAL_SECONDS;
+                totalWait += QUEUE_CHECK_INTERVAL_SECONDS;
             }
         }
-
         return false;
     }
 
-    private static Optional<Instance> findManagerInstance(Ec2Client ec2) {
-        try {
-            Filter runningFilter = Filter.builder()
-                    .name("instance-state-name")
-                    .values(InstanceStateName.RUNNING.toString())
-                    .build();
-
-            Filter managerTagFilter = Filter.builder()
-                    .name("tag:" + INSTANCE_TAG_KEY)
-                    .values(MANAGER_TAG_VALUE)
-                    .build();
-
-            DescribeInstancesRequest request = DescribeInstancesRequest.builder()
-                    .filters(runningFilter, managerTagFilter)
-                    .build();
-
-            DescribeInstancesResponse response = ec2.describeInstances(request);
-
-            return response.reservations().stream()
-                    .flatMap(r -> r.instances().stream())
-                    .findFirst();
-        } catch (Ec2Exception e) {
-            System.err.println("Error checking for Manager instance: " + e.getMessage());
-            return Optional.empty();
+    private static String uploadFileToS3(AWS aws, String localFilePath, String s3Key) {
+        File file = new File(localFilePath);
+        if (!file.exists()) {
+            throw new IllegalArgumentException("Input file not found: " + localFilePath);
         }
+
+        aws.getS3Client().putObject(
+                PutObjectRequest.builder()
+                        .bucket(AWS.S3_BUCKET_NAME)
+                        .key(s3Key)
+                        .build(),
+                RequestBody.fromFile(file));
+
+        String s3Url = "s3://" + AWS.S3_BUCKET_NAME + "/" + s3Key;
+        System.out.println("✅ Input uploaded: " + s3Url);
+        return s3Url;
     }
 
-    private static void runManagerInstance(Ec2Client ec2, String jarKey) {
-        String startupScript = String.join("\n",
-                "#!/bin/bash",
-                "exec > >(tee /var/log/user-data.log) 2>&1",
-                "apt-get update -y",
-                "apt-get install -y default-jdk awscli",
-                "aws s3 cp s3://" + S3_BUCKET_NAME + "/" + jarKey + " /home/ubuntu/Manager.jar",
-                "cd /home/ubuntu",
-                "java -jar Manager.jar > manager.log 2>&1 &",
-                "echo 'Manager started' >> /var/log/user-data.log"
-        );
-
-        String userData = Base64.getEncoder().encodeToString(startupScript.getBytes());
-
-        RunInstancesRequest runRequest = RunInstancesRequest.builder()
-                .imageId(AMI_ID)
-                .instanceType(InstanceType.fromValue(INSTANCE_TYPE))
-                .minCount(1)
-                .maxCount(1)
-                .userData(userData)
-                .tagSpecifications(TagSpecification.builder()
-                        .resourceType(ResourceType.INSTANCE)
-                        .tags(Tag.builder()
-                                .key(INSTANCE_TAG_KEY)
-                                .value(MANAGER_TAG_VALUE)
-                                .build())
-                        .build())
-                .build();
-
-        RunInstancesResponse response = ec2.runInstances(runRequest);
-        System.out.println("✅ Manager instance launch requested: " +
-                response.instances().get(0).instanceId());
-    }
-
-    /**
-     * Creates the unique done queue for this client.
-     * MUST be called BEFORE sending task to Manager!
-     */
-    private static void createDoneQueue(SqsClient sqs, String doneQueueName) {
+    private static void sendTaskToManager(AWS aws, String inputS3Url, String doneQueueName, int n) {
+        String queueUrl;
         try {
-            CreateQueueResponse response = sqs.createQueue(
-                    CreateQueueRequest.builder()
-                            .queueName(doneQueueName)
-                            .build()
-            );
-            System.out.println("✅ Created done queue: " + doneQueueName);
-        } catch (QueueNameExistsException e) {
-            System.out.println("ℹ️  Done queue already exists: " + doneQueueName);
-        } catch (SqsException e) {
-            System.err.println("Error creating done queue: " + e.getMessage());
-            throw e;
+            queueUrl = aws.getQueueUrl(AWS.INPUT_QUEUE_NAME);
+        } catch (QueueDoesNotExistException e) {
+            queueUrl = aws.createQueue(AWS.INPUT_QUEUE_NAME);
         }
+        String messageBody = String.format("%s|%s|%d", inputS3Url, doneQueueName, n);
+
+        aws.getSqsClient().sendMessage(SendMessageRequest.builder()
+                .queueUrl(queueUrl)
+                .messageBody(messageBody)
+                .build());
+
+        System.out.println("✅ Task sent to Manager.");
     }
 
-    private static void uploadFileToS3(S3Client s3, String localFilePath, String bucketName, String s3Key) {
-        try {
-            File file = new File(localFilePath);
-            if (!file.exists()) {
-                throw new IllegalArgumentException("Input file not found: " + localFilePath);
-            }
-
-            PutObjectRequest putReq = PutObjectRequest.builder()
-                    .bucket(bucketName)
-                    .key(s3Key)
-                    .build();
-
-            s3.putObject(putReq, RequestBody.fromFile(file));
-            System.out.println("✅ Input file uploaded to S3: s3://" + bucketName + "/" + s3Key);
-        } catch (S3Exception e) {
-            System.err.println("Error uploading to S3: " + e.getMessage());
-            throw e;
-        }
-    }
-
-    private static void sendInitialTaskMessage(SqsClient sqs, String inputS3Url, String doneQueueName, int n) {
-        try {
-            GetQueueUrlResponse urlResponse = sqs.getQueueUrl(
-                    GetQueueUrlRequest.builder()
-                            .queueName(INPUT_QUEUE_NAME)
-                            .build()
-            );
-            String queueUrl = urlResponse.queueUrl();
-
-            // Message format: inputS3Url|doneQueueName|n
-            String messageBody = String.format("%s|%s|%d", inputS3Url, doneQueueName, n);
-
-            sqs.sendMessage(SendMessageRequest.builder()
-                    .queueUrl(queueUrl)
-                    .messageBody(messageBody)
-                    .build());
-
-            System.out.println("✅ Task message sent to Manager queue.");
-        } catch (SqsException e) {
-            System.err.println("Error sending task message: " + e.getMessage());
-            throw e;
-        }
-    }
-
-    private static String waitForDoneMessageAndGetSummaryUrl(SqsClient sqs, String doneQueueName)
+    private static String waitForCompletion(AWS aws, String doneQueueUrl, String jobId)
             throws InterruptedException {
-
-        String doneQueueUrl;
-        try {
-            GetQueueUrlResponse urlResponse = sqs.getQueueUrl(
-                    GetQueueUrlRequest.builder()
-                            .queueName(doneQueueName)
-                            .build()
-            );
-            doneQueueUrl = urlResponse.queueUrl();
-        } catch (SqsException e) {
-            System.err.println("Could not get done queue URL: " + e.getMessage());
-            return null;
-        }
-
-        System.out.println("⏳ Waiting for job completion...");
+        System.out.println("⏳ Waiting for job " + jobId + " completion...");
 
         while (true) {
-            ReceiveMessageRequest receiveRequest = ReceiveMessageRequest.builder()
-                    .queueUrl(doneQueueUrl)
-                    .maxNumberOfMessages(1)
-                    .waitTimeSeconds(20) // Long polling - efficient!
-                    .build();
+            ReceiveMessageResponse response = aws.getSqsClient().receiveMessage(
+                    ReceiveMessageRequest.builder()
+                            .queueUrl(doneQueueUrl)
+                            .maxNumberOfMessages(1)
+                            .waitTimeSeconds(20)
+                            .build());
 
-            ReceiveMessageResponse receiveResponse = sqs.receiveMessage(receiveRequest);
-            List<Message> messages = receiveResponse.messages();
-
+            List<Message> messages = response.messages();
             if (!messages.isEmpty()) {
                 Message message = messages.get(0);
                 String summaryS3Url = message.body();
 
-                // Delete message from queue
-                sqs.deleteMessage(DeleteMessageRequest.builder()
+                aws.getSqsClient().deleteMessage(DeleteMessageRequest.builder()
                         .queueUrl(doneQueueUrl)
                         .receiptHandle(message.receiptHandle())
                         .build());
 
-                System.out.println("✅ Completion message received!");
+                System.out.println("✅ Job " + jobId + " completion message received!");
                 return summaryS3Url;
             } else {
                 System.out.print(".");
@@ -351,74 +244,37 @@ public class LocalApplication {
         }
     }
 
-    private static void downloadSummaryFile(S3Client s3, String s3Url, String outputFileName) {
-        try {
-            // Parse s3://bucket/key format
-            if (!s3Url.startsWith("s3://")) {
-                throw new IllegalArgumentException("Invalid S3 URL format: " + s3Url);
-            }
+    private static void downloadSummaryFile(AWS aws, String s3Url, String outputFileName) {
+        String s3UrlStripped = s3Url.substring(5);
+        int firstSlash = s3UrlStripped.indexOf('/');
+        String bucket = s3UrlStripped.substring(0, firstSlash);
+        String key = s3UrlStripped.substring(firstSlash + 1);
 
-            String s3UrlStripped = s3Url.substring(5); // Remove "s3://"
-            int firstSlash = s3UrlStripped.indexOf('/');
-
-            if (firstSlash == -1) {
-                throw new IllegalArgumentException("Invalid S3 URL format: " + s3Url);
-            }
-
-            String bucket = s3UrlStripped.substring(0, firstSlash);
-            String key = s3UrlStripped.substring(firstSlash + 1);
-
-            GetObjectRequest getReq = GetObjectRequest.builder()
-                    .bucket(bucket)
-                    .key(key)
-                    .build();
-
-            s3.getObject(getReq, ResponseTransformer.toFile(Paths.get(outputFileName)));
-            System.out.println("✅ Summary file downloaded: " + outputFileName);
-        } catch (S3Exception e) {
-            System.err.println("Error downloading summary file: " + e.getMessage());
-            throw e;
-        } catch (Exception e) {
-            System.err.println("Error processing S3 URL: " + e.getMessage());
-            throw e;
+        // Delete existing file if it exists (so we can overwrite)
+        File outputFile = new File(outputFileName);
+        if (outputFile.exists()) {
+            outputFile.delete();
         }
+
+        aws.getS3Client().getObject(
+                GetObjectRequest.builder()
+                        .bucket(bucket)
+                        .key(key)
+                        .build(),
+                ResponseTransformer.toFile(Paths.get(outputFileName)));
+
+        System.out.println("✅ Summary downloaded: " + outputFileName);
     }
 
-    private static void sendTerminationMessage(SqsClient sqs) {
+    private static void sendTerminationMessage(AWS aws) {
         try {
-            GetQueueUrlResponse urlResponse = sqs.getQueueUrl(
-                    GetQueueUrlRequest.builder()
-                            .queueName(INPUT_QUEUE_NAME)
-                            .build()
-            );
-            String queueUrl = urlResponse.queueUrl();
-
-            sqs.sendMessage(SendMessageRequest.builder()
+            String queueUrl = aws.getQueueUrl(AWS.INPUT_QUEUE_NAME);
+            aws.getSqsClient().sendMessage(SendMessageRequest.builder()
                     .queueUrl(queueUrl)
                     .messageBody("TERMINATE")
                     .build());
-        } catch (SqsException e) {
-            System.err.println("Error sending termination message: " + e.getMessage());
-        }
-    }
-
-    private static void deleteQueue(SqsClient sqs, String doneQueueName) {
-        try {
-            GetQueueUrlResponse urlResponse = sqs.getQueueUrl(
-                    GetQueueUrlRequest.builder()
-                            .queueName(doneQueueName)
-                            .build()
-            );
-
-            sqs.deleteQueue(DeleteQueueRequest.builder()
-                    .queueUrl(urlResponse.queueUrl())
-                    .build());
-
-            System.out.println("✅ Done queue cleaned up: " + doneQueueName);
-        } catch (QueueDoesNotExistException e) {
-            // Queue doesn't exist, nothing to clean up
-        } catch (SqsException e) {
-            System.err.println("Error deleting queue: " + e.getMessage());
+        } catch (Exception e) {
+            System.err.println("Error sending termination: " + e.getMessage());
         }
     }
 }

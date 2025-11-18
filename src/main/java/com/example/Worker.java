@@ -10,10 +10,7 @@ import edu.stanford.nlp.semgraph.SemanticGraph;
 import edu.stanford.nlp.semgraph.SemanticGraphCoreAnnotations;
 import edu.stanford.nlp.util.CoreMap;
 
-import software.amazon.awssdk.regions.Region;
-import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
-import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.*;
 import software.amazon.awssdk.core.sync.RequestBody;
 
@@ -27,13 +24,8 @@ import java.util.concurrent.TimeUnit;
 
 public class Worker {
 
-    // --- Configuration Constants ---
-    private static final Region REGION = Region.EU_WEST_1;
-    private static final String S3_BUCKET_NAME = "your-unique-bucket-name-here";
-    private static final int MAX_TEXT_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB limit for safety
-    private static final int DOWNLOAD_TIMEOUT_MS = 60000; // 1 minute timeout for downloads
-
-    // Stanford NLP Pipeline (initialized once for efficiency)
+    private static final int MAX_TEXT_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
+    private static final int DOWNLOAD_TIMEOUT_MS = 60000; // 1 minute
     private static StanfordCoreNLP pipeline;
 
     public static void main(String[] args) {
@@ -49,340 +41,249 @@ public class Worker {
         System.out.println("Task Queue: " + taskQueueName);
         System.out.println("Result Queue: " + resultQueueName);
 
-        // Initialize Stanford CoreNLP pipeline (expensive operation - do once)
+        // Initialize NLP pipeline
         initializeNLPPipeline();
 
-        try (SqsClient sqs = SqsClient.builder().region(REGION).build();
-             S3Client s3 = S3Client.builder().region(REGION).build()) {
+        AWS aws = AWS.getInstance();
 
-            String taskQueueUrl = getQueueUrl(sqs, taskQueueName);
-            String resultQueueUrl = getQueueUrl(sqs, resultQueueName);
+        try {
+            String taskQueueUrl = aws.getQueueUrl(taskQueueName);
+            String resultQueueUrl = aws.getQueueUrl(resultQueueName);
 
-            System.out.println("Worker ready. Starting message processing loop...");
+            System.out.println("Worker ready. Processing tasks...");
 
-            // Main worker loop - continuously process messages
+            // Main processing loop
             while (true) {
                 try {
-                    // Receive messages from task queue
-                    List<Message> messages = receiveMessages(sqs, taskQueueUrl);
+                    ReceiveMessageResponse response = aws.getSqsClient().receiveMessage(
+                            ReceiveMessageRequest.builder()
+                                    .queueUrl(taskQueueUrl)
+                                    .maxNumberOfMessages(1)
+                                    .waitTimeSeconds(20)
+                                    .build());
 
+                    List<Message> messages = response.messages();
                     if (messages.isEmpty()) {
-                        // No messages - brief sleep before next poll
                         TimeUnit.SECONDS.sleep(2);
                         continue;
                     }
 
                     for (Message message : messages) {
-                        processTaskMessage(sqs, s3, message, taskQueueUrl, resultQueueUrl);
+                        processTask(aws, message, taskQueueUrl, resultQueueUrl);
                     }
 
                 } catch (InterruptedException e) {
-                    System.out.println("Worker interrupted. Shutting down gracefully...");
+                    System.out.println("Worker interrupted. Shutting down...");
                     Thread.currentThread().interrupt();
                     break;
                 } catch (Exception e) {
-                    System.err.println("Error in worker main loop: " + e.getMessage());
+                    System.err.println("Worker error: " + e.getMessage());
                     e.printStackTrace();
-                    // Continue processing other messages
                 }
             }
 
         } catch (Exception e) {
-            System.err.println("Fatal error in Worker: " + e.getMessage());
+            System.err.println("Fatal error: " + e.getMessage());
             e.printStackTrace();
         }
 
         System.out.println("Worker terminated.");
     }
 
-    // =================================================================================
-    // NLP PIPELINE INITIALIZATION
-    // =================================================================================
-
     private static void initializeNLPPipeline() {
-        System.out.println("Initializing Stanford CoreNLP pipeline...");
+        System.out.println("Initializing Stanford CoreNLP...");
         Properties props = new Properties();
-        // Configure annotators for all three analysis types
         props.setProperty("annotators", "tokenize,ssplit,pos,lemma,parse");
         props.setProperty("parse.model", "edu/stanford/nlp/models/lexparser/englishPCFG.ser.gz");
         props.setProperty("tokenize.language", "en");
-
         pipeline = new StanfordCoreNLP(props);
-        System.out.println("Pipeline initialized successfully.");
+        System.out.println("Pipeline ready.");
     }
 
-    // =================================================================================
-    // SQS HELPERS
-    // =================================================================================
-
-    private static String getQueueUrl(SqsClient sqs, String queueName) {
-        try {
-            return sqs.getQueueUrl(GetQueueUrlRequest.builder()
-                    .queueName(queueName)
-                    .build()).queueUrl();
-        } catch (QueueDoesNotExistException e) {
-            System.err.println("Queue does not exist: " + queueName);
-            throw e;
-        }
-    }
-
-    private static List<Message> receiveMessages(SqsClient sqs, String queueUrl) {
-        try {
-            ReceiveMessageRequest receiveRequest = ReceiveMessageRequest.builder()
-                    .queueUrl(queueUrl)
-                    .maxNumberOfMessages(1) // Process one at a time for reliability
-                    .waitTimeSeconds(20) // Long polling
-                    .build();
-
-            return sqs.receiveMessage(receiveRequest).messages();
-        } catch (SqsException e) {
-            System.err.println("Error receiving messages: " + e.getMessage());
-            return List.of();
-        }
-    }
-
-    private static void deleteMessage(SqsClient sqs, String queueUrl, String receiptHandle) {
-        try {
-            sqs.deleteMessage(DeleteMessageRequest.builder()
-                    .queueUrl(queueUrl)
-                    .receiptHandle(receiptHandle)
-                    .build());
-        } catch (SqsException e) {
-            System.err.println("Error deleting message: " + e.getMessage());
-        }
-    }
-
-    private static void sendResultMessage(SqsClient sqs, String queueUrl, String messageBody) {
-        try {
-            sqs.sendMessage(SendMessageRequest.builder()
-                    .queueUrl(queueUrl)
-                    .messageBody(messageBody)
-                    .build());
-        } catch (SqsException e) {
-            System.err.println("Error sending result message: " + e.getMessage());
-            throw e;
-        }
-    }
-
-    // =================================================================================
-    // TASK PROCESSING
-    // =================================================================================
-
-    /**
-     * Processes a single task message.
-     * Message format: ANALYSIS_TYPE\tURL|DONE_QUEUE_NAME
-     */
-    private static void processTaskMessage(SqsClient sqs, S3Client s3, Message message,
-                                           String taskQueueUrl, String resultQueueUrl) {
-        String messageBody = message.body();
+    private static void processTask(AWS aws, Message message, String taskQueueUrl, String resultQueueUrl) {
+        String body = message.body();
         String receiptHandle = message.receiptHandle();
 
-        System.out.println("\n--- Processing new task ---");
-        System.out.println("Message: " + messageBody);
+        System.out.println("\n--- Processing task ---");
 
         try {
-            // Parse message: "ANALYSIS_TYPE\tURL|DONE_QUEUE_NAME"
-            String[] mainParts = messageBody.split("\\|", 2);
+            // Parse: ANALYSIS_TYPE\tURL|DONE_QUEUE_NAME
+            String[] mainParts = body.split("\\|", 2);
             if (mainParts.length != 2) {
-                throw new IllegalArgumentException("Invalid message format (missing |): " + messageBody);
+                throw new IllegalArgumentException("Invalid message format");
             }
 
-            String taskPart = mainParts[0]; // "ANALYSIS_TYPE\tURL"
+            String taskPart = mainParts[0];
             String doneQueueName = mainParts[1];
 
             String[] taskDetails = taskPart.split("\t", 2);
             if (taskDetails.length != 2) {
-                throw new IllegalArgumentException("Invalid task format (missing tab): " + taskPart);
+                throw new IllegalArgumentException("Invalid task format");
             }
 
             String analysisType = taskDetails[0].trim().toUpperCase();
             String inputUrl = taskDetails[1].trim();
 
-            System.out.println("Analysis Type: " + analysisType);
-            System.out.println("Input URL: " + inputUrl);
-            System.out.println("Done Queue: " + doneQueueName);
+            System.out.println("Type: " + analysisType);
+            System.out.println("URL: " + inputUrl);
 
             // Validate analysis type
-            if (!analysisType.equals("POS") &&
-                    !analysisType.equals("CONSTITUENCY") &&
+            if (!analysisType.equals("POS") && !analysisType.equals("CONSTITUENCY") &&
                     !analysisType.equals("DEPENDENCY")) {
                 throw new IllegalArgumentException("Unknown analysis type: " + analysisType);
             }
 
-            // 1. Download text file from URL
-            String textContent = downloadTextFromUrl(inputUrl);
+            // 1. Download text
+            String text = downloadText(inputUrl);
 
-            // 2. Perform NLP analysis
-            String analysisResult = performAnalysis(textContent, analysisType);
+            // 2. Perform analysis
+            String analysisResult = performAnalysis(text, analysisType);
 
             // 3. Upload result to S3
-            String outputS3Url = uploadResultToS3(s3, analysisResult, doneQueueName, analysisType);
+            String outputS3Url = uploadResultToS3(aws, analysisResult, doneQueueName, analysisType);
 
-            // 4. Send result message to manager
-            // Format: DONE_QUEUE_NAME|<analysis type>: <input file> <output file>
+            // 4. Send result to manager
             String resultMessage = String.format("%s|%s: <a href=\"%s\">%s</a> <a href=\"%s\">output</a>",
                     doneQueueName, analysisType, inputUrl, inputUrl, outputS3Url);
 
-            sendResultMessage(sqs, resultQueueUrl, resultMessage);
+            aws.getSqsClient().sendMessage(SendMessageRequest.builder()
+                    .queueUrl(resultQueueUrl)
+                    .messageBody(resultMessage)
+                    .build());
 
-            System.out.println("✅ Task completed successfully!");
+            System.out.println("✅ Task complete.");
 
         } catch (Exception e) {
-            // Handle exceptions gracefully - send error message to manager
-            System.err.println("❌ Error processing task: " + e.getMessage());
-            e.printStackTrace();
+            System.err.println("❌ Task failed: " + e.getMessage());
 
+            // Send error result
             try {
-                // Extract what we can from the message
-                String[] mainParts = messageBody.split("\\|", 2);
+                String[] mainParts = body.split("\\|", 2);
                 String doneQueueName = mainParts.length > 1 ? mainParts[1] : "unknown";
 
                 String[] taskDetails = mainParts[0].split("\t", 2);
                 String analysisType = taskDetails.length > 0 ? taskDetails[0].trim() : "UNKNOWN";
                 String inputUrl = taskDetails.length > 1 ? taskDetails[1].trim() : "unknown";
 
-                // Send error result
                 String errorMessage = String.format("%s|%s: <a href=\"%s\">%s</a> ERROR: %s",
-                        doneQueueName, analysisType, inputUrl, inputUrl,
-                        escapeHtml(e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName()));
+                        doneQueueName, analysisType, inputUrl, inputUrl, escapeHtml(e.getMessage()));
 
-                sendResultMessage(sqs, resultQueueUrl, errorMessage);
+                aws.getSqsClient().sendMessage(SendMessageRequest.builder()
+                        .queueUrl(resultQueueUrl)
+                        .messageBody(errorMessage)
+                        .build());
 
             } catch (Exception e2) {
                 System.err.println("Failed to send error message: " + e2.getMessage());
             }
         } finally {
-            // IMPORTANT: Always delete message from queue after processing (success or failure)
-            // This ensures the message doesn't get reprocessed
-            deleteMessage(sqs, taskQueueUrl, receiptHandle);
+            // Always delete message
+            aws.getSqsClient().deleteMessage(DeleteMessageRequest.builder()
+                    .queueUrl(taskQueueUrl)
+                    .receiptHandle(receiptHandle)
+                    .build());
         }
     }
 
-    // =================================================================================
-    // TEXT DOWNLOAD
-    // =================================================================================
-
-    private static String downloadTextFromUrl(String urlString) throws IOException {
-        System.out.println("Downloading text from: " + urlString);
+    private static String downloadText(String urlString) throws IOException {
+        System.out.println("Downloading from: " + urlString);
 
         URL url = new URL(urlString);
-        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-        connection.setRequestMethod("GET");
-        connection.setConnectTimeout(DOWNLOAD_TIMEOUT_MS);
-        connection.setReadTimeout(DOWNLOAD_TIMEOUT_MS);
-        connection.setRequestProperty("User-Agent", "Mozilla/5.0"); // Some servers require this
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("GET");
+        conn.setConnectTimeout(DOWNLOAD_TIMEOUT_MS);
+        conn.setReadTimeout(DOWNLOAD_TIMEOUT_MS);
+        conn.setRequestProperty("User-Agent", "Mozilla/5.0");
 
-        int responseCode = connection.getResponseCode();
+        int responseCode = conn.getResponseCode();
         if (responseCode != 200) {
-            throw new IOException("HTTP error code: " + responseCode + " for URL: " + urlString);
+            throw new IOException("HTTP error: " + responseCode);
         }
 
-        // Check content length to avoid downloading huge files
-        long contentLength = connection.getContentLengthLong();
+        long contentLength = conn.getContentLengthLong();
         if (contentLength > MAX_TEXT_SIZE_BYTES) {
-            throw new IOException("File too large: " + contentLength + " bytes (max: " + MAX_TEXT_SIZE_BYTES + ")");
+            throw new IOException("File too large: " + contentLength + " bytes");
         }
 
         StringBuilder content = new StringBuilder();
         try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(connection.getInputStream(), "UTF-8"))) {
+                new InputStreamReader(conn.getInputStream(), "UTF-8"))) {
 
             String line;
             int totalBytes = 0;
             while ((line = reader.readLine()) != null) {
                 totalBytes += line.getBytes("UTF-8").length;
                 if (totalBytes > MAX_TEXT_SIZE_BYTES) {
-                    throw new IOException("File exceeded size limit during download");
+                    throw new IOException("File exceeded size limit");
                 }
                 content.append(line).append("\n");
             }
         }
 
-        System.out.println("Download complete. Size: " + content.length() + " characters");
+        System.out.println("Downloaded " + content.length() + " chars.");
         return content.toString();
     }
 
-    // =================================================================================
-    // NLP ANALYSIS
-    // =================================================================================
-
-    private static String performAnalysis(String text, String analysisType) throws Exception {
+    private static String performAnalysis(String text, String analysisType) {
         System.out.println("Performing " + analysisType + " analysis...");
 
         if (text == null || text.trim().isEmpty()) {
-            throw new IllegalArgumentException("Text content is empty");
+            throw new IllegalArgumentException("Text is empty");
         }
 
         StringBuilder result = new StringBuilder();
-
-        // For very large texts, process line by line to avoid memory issues
         String[] lines = text.split("\n");
-        int lineCount = 0;
-        int processedLines = 0;
+        int processed = 0;
 
-        for (String line : lines) {
-            lineCount++;
-
-            // Skip empty lines
-            if (line.trim().isEmpty()) {
-                continue;
-            }
-
-            // Limit processing to avoid extremely long execution times
-            if (processedLines >= 100) {
-                result.append("[... truncated after 100 non-empty lines ...]\n");
-                break;
-            }
+        for (int i = 0; i < lines.length && processed < 100; i++) {
+            String line = lines[i].trim();
+            if (line.isEmpty()) continue;
 
             try {
                 String lineResult = analyzeLine(line, analysisType);
-                result.append("Line ").append(lineCount).append(":\n");
+                result.append("Line ").append(i + 1).append(":\n");
                 result.append(lineResult).append("\n\n");
-                processedLines++;
+                processed++;
             } catch (Exception e) {
-                result.append("Line ").append(lineCount).append(": ERROR - ")
+                result.append("Line ").append(i + 1).append(": ERROR - ")
                         .append(e.getMessage()).append("\n\n");
             }
         }
 
-        System.out.println("Analysis complete. Processed " + processedLines + " lines.");
+        if (processed >= 100) {
+            result.append("[Truncated after 100 lines]\n");
+        }
+
+        System.out.println("Analysis complete. Processed " + processed + " lines.");
         return result.toString();
     }
 
     private static String analyzeLine(String line, String analysisType) {
-        // Create an annotation object with the text
         Annotation document = new Annotation(line);
-
-        // Run all annotators on the text
         pipeline.annotate(document);
 
-        // Get sentences from the document
         List<CoreMap> sentences = document.get(CoreAnnotations.SentencesAnnotation.class);
-
-        StringBuilder lineResult = new StringBuilder();
+        StringBuilder result = new StringBuilder();
 
         for (CoreMap sentence : sentences) {
             switch (analysisType) {
                 case "POS":
-                    lineResult.append(performPOSTagging(sentence));
+                    result.append(performPOS(sentence));
                     break;
                 case "CONSTITUENCY":
-                    lineResult.append(performConstituencyParsing(sentence));
+                    result.append(performConstituency(sentence));
                     break;
                 case "DEPENDENCY":
-                    lineResult.append(performDependencyParsing(sentence));
+                    result.append(performDependency(sentence));
                     break;
             }
-            lineResult.append("\n");
+            result.append("\n");
         }
 
-        return lineResult.toString();
+        return result.toString();
     }
 
-    /**
-     * Part-of-Speech Tagging
-     */
-    private static String performPOSTagging(CoreMap sentence) {
+    private static String performPOS(CoreMap sentence) {
         StringBuilder result = new StringBuilder();
         List<CoreLabel> tokens = sentence.get(CoreAnnotations.TokensAnnotation.class);
 
@@ -395,32 +296,18 @@ public class Worker {
         return result.toString().trim();
     }
 
-    /**
-     * Constituency Parsing (Tree representation)
-     */
-    private static String performConstituencyParsing(CoreMap sentence) {
+    private static String performConstituency(CoreMap sentence) {
         Tree tree = sentence.get(TreeCoreAnnotations.TreeAnnotation.class);
         return tree.toString();
     }
 
-    /**
-     * Dependency Parsing
-     */
-    private static String performDependencyParsing(CoreMap sentence) {
+    private static String performDependency(CoreMap sentence) {
         SemanticGraph dependencies = sentence.get(
                 SemanticGraphCoreAnnotations.BasicDependenciesAnnotation.class);
         return dependencies.toString();
     }
 
-    // =================================================================================
-    // S3 UPLOAD
-    // =================================================================================
-
-    private static String uploadResultToS3(S3Client s3, String content, String doneQueueName,
-                                           String analysisType) throws Exception {
-        System.out.println("Uploading result to S3...");
-
-        // Generate unique file name
+    private static String uploadResultToS3(AWS aws, String content, String doneQueueName, String analysisType) {
         String fileName = String.format("%s-%s-%s.txt",
                 analysisType.toLowerCase(),
                 UUID.randomUUID().toString(),
@@ -428,32 +315,19 @@ public class Worker {
 
         String s3Key = "results/" + doneQueueName + "/" + fileName;
 
-        try {
-            s3.putObject(
-                    PutObjectRequest.builder()
-                            .bucket(S3_BUCKET_NAME)
-                            .key(s3Key)
-                            .contentType("text/plain")
-                            .build(),
-                    RequestBody.fromString(content));
+        aws.getS3Client().putObject(
+                PutObjectRequest.builder()
+                        .bucket(AWS.S3_BUCKET_NAME)
+                        .key(s3Key)
+                        .contentType("text/plain")
+                        .build(),
+                RequestBody.fromString(content));
 
-            String s3Url = String.format("s3://%s/%s", S3_BUCKET_NAME, s3Key);
-            System.out.println("Upload complete: " + s3Url);
-            return s3Url;
-
-        } catch (Exception e) {
-            System.err.println("Error uploading to S3: " + e.getMessage());
-            throw e;
-        }
+        String s3Url = "s3://" + AWS.S3_BUCKET_NAME + "/" + s3Key;
+        System.out.println("Uploaded: " + s3Url);
+        return s3Url;
     }
 
-    // =================================================================================
-    // UTILITY METHODS
-    // =================================================================================
-
-    /**
-     * Escape HTML special characters to prevent XSS in error messages
-     */
     private static String escapeHtml(String text) {
         if (text == null) return "";
         return text.replace("&", "&amp;")
