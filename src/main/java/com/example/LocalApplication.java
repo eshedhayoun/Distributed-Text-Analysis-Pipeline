@@ -133,12 +133,29 @@ public class LocalApplication {
         String startupScript = String.join("\n",
                 "#!/bin/bash",
                 "exec > >(tee /var/log/user-data.log) 2>&1",
+                "echo 'Starting Manager setup...'",
                 "apt-get update -y",
-                "apt-get install -y default-jdk awscli",
-                "aws s3 cp s3://" + AWS.S3_BUCKET_NAME + "/" + AWS.MANAGER_JAR_KEY + " /home/ubuntu/Manager.jar",
+                "apt-get install -y default-jdk unzip curl",
+                "echo 'Installing AWS CLI...'",
+                "cd /tmp",
+                "curl 'https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip' -o 'awscliv2.zip'",
+                "unzip -q awscliv2.zip",
+                "./aws/install",
+                "echo 'AWS CLI installed'",
                 "cd /home/ubuntu",
-                "java -jar Manager.jar > manager.log 2>&1 &",
-                "echo 'Manager started'"
+                "echo 'Downloading Manager JAR...'",
+                "/usr/local/bin/aws s3 cp s3://" + AWS.S3_BUCKET_NAME + "/" + AWS.MANAGER_JAR_KEY + " Manager.jar",
+                "echo 'Downloading lib folder...'",
+                "/usr/local/bin/aws s3 cp s3://" + AWS.S3_BUCKET_NAME + "/jars/lib/ lib/ --recursive",
+                "ls -lh Manager.jar",
+                "ls -lh lib/ | head -5",
+                "echo 'Starting Manager Java process...'",
+                "java -version",
+                "java -cp Manager.jar:lib/* com.example.Manager > manager.log 2>&1 &",                "sleep 5",
+                "ps aux | grep java",
+                "echo '=== Manager log ==='",
+                "cat manager.log",
+                "echo 'Manager startup complete'"
         );
 
         String userData = Base64.getEncoder().encodeToString(startupScript.getBytes());

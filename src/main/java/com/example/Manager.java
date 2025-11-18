@@ -184,11 +184,14 @@ public class Manager {
                 "#!/bin/bash",
                 "exec > >(tee /var/log/user-data.log) 2>&1",
                 "apt-get update -y",
-                "apt-get install -y default-jdk awscli",
-                "aws s3 cp s3://" + AWS.S3_BUCKET_NAME + "/" + AWS.WORKER_JAR_KEY + " /home/ubuntu/Worker.jar",
+                "apt-get install -y default-jdk unzip curl",
+                "curl 'https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip' -o 'awscliv2.zip'",
+                "unzip awscliv2.zip",
+                "./aws/install",
                 "cd /home/ubuntu",
-                "java -jar Worker.jar " + AWS.TASK_QUEUE_NAME + " " + AWS.RESULT_QUEUE_NAME + " > worker.log 2>&1 &",
-                "echo 'Worker started'"
+                "/usr/local/bin/aws s3 cp s3://" + AWS.S3_BUCKET_NAME + "/" + AWS.WORKER_JAR_KEY + " Worker.jar",
+                "/usr/local/bin/aws s3 cp s3://" + AWS.S3_BUCKET_NAME + "/jars/lib/ lib/ --recursive",  // ← ADD THIS LINE
+                "java -cp Worker.jar:lib/* com.example.Worker " + AWS.TASK_QUEUE_NAME + " " + AWS.RESULT_QUEUE_NAME + " > worker.log 2>&1 &",                "echo 'Worker started'"
         );
 
         String userData = Base64.getEncoder().encodeToString(startupScript.getBytes());
