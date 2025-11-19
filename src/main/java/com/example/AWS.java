@@ -150,7 +150,7 @@ public final class AWS {
                 RunInstancesRequest.builder()
                         .imageId(AMI_ID)
                         .instanceType(InstanceType.fromValue(INSTANCE_TYPE))
-                        .minCount(count)
+                        .minCount(1)
                         .maxCount(count)
                         .userData(userData)
                         .iamInstanceProfile(IamInstanceProfileSpecification.builder()
