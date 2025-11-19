@@ -214,20 +214,30 @@ public final class AWS {
      */
     public String getCurrentInstanceId() {
         try {
-            java.net.URL url = new java.net.URL("http://169.254.169.254/latest/meta-data/instance-id");
-            java.net.URLConnection conn = url.openConnection();
-            conn.setConnectTimeout(2000);
-            conn.setReadTimeout(2000);
+            // Find Manager instance by tag
+            DescribeInstancesResponse response = ec2Client.describeInstances(
+                    DescribeInstancesRequest.builder()
+                            .filters(
+                                    Filter.builder().name("tag:Type").values(MANAGER_TAG_VALUE).build(),
+                                    Filter.builder().name("instance-state-name").values("running").build()
+                            )
+                            .build()
+            );
 
-            try (java.io.BufferedReader reader = new java.io.BufferedReader(
-                    new java.io.InputStreamReader(conn.getInputStream()))) {
-                return reader.readLine();
-            }
+            String instanceId = response.reservations().stream()
+                    .flatMap(r -> r.instances().stream())
+                    .findFirst()
+                    .map(Instance::instanceId)
+                    .orElse(null);
+
+            System.out.println("Manager instance ID: " + instanceId);
+            return instanceId;
+
         } catch (Exception e) {
-            return null; // Not running on EC2
+            System.err.println("Error finding Manager: " + e.getMessage());
+            return null;
         }
     }
-
     // ==================== CLEANUP ====================
 
     public void close() {
