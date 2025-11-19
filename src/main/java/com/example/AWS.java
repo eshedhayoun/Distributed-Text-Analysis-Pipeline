@@ -213,12 +213,31 @@ public final class AWS {
      * Gets current instance ID from EC2 metadata (only works when running ON EC2).
      */
     public String getCurrentInstanceId() {
+        // Try metadata service first (faster)
         try {
-            // Find Manager instance by tag
+            java.net.URL url = new java.net.URL("http://169.254.169.254/latest/meta-data/instance-id");
+            java.net.URLConnection conn = url.openConnection();
+            conn.setConnectTimeout(2000);
+            conn.setReadTimeout(2000);
+
+            try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(conn.getInputStream()))) {
+                String instanceId = reader.readLine();
+                if (instanceId != null && !instanceId.isEmpty()) {
+                    return instanceId;
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("⚠️ Metadata service unavailable: " + e.getMessage());
+        }
+
+        // Fallback: Find Manager by tag
+        try {
+            System.out.println("🔍 Falling back to finding Manager by tag...");
             DescribeInstancesResponse response = ec2Client.describeInstances(
                     DescribeInstancesRequest.builder()
                             .filters(
-                                    Filter.builder().name("tag:Type").values(MANAGER_TAG_VALUE).build(),
+                                    Filter.builder().name("tag:" + INSTANCE_TAG_KEY).values(MANAGER_TAG_VALUE).build(),
                                     Filter.builder().name("instance-state-name").values("running").build()
                             )
                             .build()
@@ -230,14 +249,16 @@ public final class AWS {
                     .map(Instance::instanceId)
                     .orElse(null);
 
-            System.out.println("Manager instance ID: " + instanceId);
+            if (instanceId != null) {
+                System.out.println("✅ Found Manager instance ID: " + instanceId);
+            }
             return instanceId;
-
         } catch (Exception e) {
-            System.err.println("Error finding Manager: " + e.getMessage());
+            System.err.println("❌ Failed to find Manager by tag: " + e.getMessage());
             return null;
         }
     }
+
     // ==================== CLEANUP ====================
 
     public void close() {

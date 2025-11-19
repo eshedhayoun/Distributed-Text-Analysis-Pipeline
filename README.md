@@ -85,7 +85,7 @@ DEPENDENCY	https://example.com/doc3.txt
 
 **Example:**
 ```bash
-  java -jar target/distributed-text-analysis-pipeline-1.0-SNAPSHOT.jar input-samples/input-sample.txt test.html 1 terminate
+  java -jar target/distributed-text-analysis-pipeline-1.0-SNAPSHOT.jar input-samples/input-sample-small.txt test.html 1
 ```
 
 ## Configuration
