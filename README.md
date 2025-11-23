@@ -47,20 +47,20 @@ mvn clean package
 ```
 
 ### Deploy
-1. Create S3 bucket:
-```bash
-aws s3 mb s3://your-bucket-name
-```
 
-2. Upload JARs:
+1. Create S3 Bucket:
 ```bash
-aws s3 cp target/distributed-text-analysis-pipeline-1.0-SNAPSHOT.jar s3://your-bucket/jars/
-aws s3 cp target/lib/ s3://your-bucket/jars/lib/ --recursive
+aws s3 mb s3://distributed-text-analysis-pipeline-inputs-us-east-1 --region us-east-1
+```     
+
+2.Upload JARs:
+```bash
+aws s3 cp target/distributed-text-analysis-pipeline-1.0-SNAPSHOT.jar s3://distributed-text-analysis-pipeline-inputs-us-east-1/jars/
+aws s3 cp target/lib/ s3://distributed-text-analysis-pipeline-inputs-us-east-1/jars/lib/ --recursive
 ```
 
 3. Update `AWS.java`:
 ```java
-public static final String S3_BUCKET_NAME = "your-bucket-name";
 public static final String AMI_ID = "ami-xxxxxxxxx";
 ```
 
@@ -86,6 +86,7 @@ DEPENDENCY	https://example.com/doc3.txt
 **Example:**
 ```bash
   java -jar target/distributed-text-analysis-pipeline-1.0-SNAPSHOT.jar input-samples/input-sample-small.txt test.html 1
+// make sure its run on a terminal with credentials exported
 ```
 
 ## Configuration
