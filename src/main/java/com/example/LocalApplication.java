@@ -56,14 +56,14 @@ public class LocalApplication {
 
             // 0. Ensure S3 bucket exists
             aws.createBucketIfNotExists(AWS.S3_BUCKET_NAME);
-            System.out.println("✅ S3 Bucket ready: " + AWS.S3_BUCKET_NAME);
+            System.out.println("S3 Bucket ready: " + AWS.S3_BUCKET_NAME);
 
             // 1. Check if Manager is running, if not - launch it
             ensureManagerIsRunning(aws);
 
             // 2. Create unique done queue for THIS job BEFORE sending task
             doneQueueUrl = aws.createQueue(doneQueueName);
-            System.out.println("✅ Created done queue for this job: " + doneQueueName);
+            System.out.println("Created done queue for this job: " + doneQueueName);
 
             // 3. Upload input file to S3 (unique per job)
             String s3Key = "input/" + jobId + "/" + new File(inputFilePath).getName();
@@ -78,15 +78,15 @@ public class LocalApplication {
             if (summaryS3Url != null) {
                 // 6. Download summary file
                 downloadSummaryFile(aws, summaryS3Url, outputFileName);
-                System.out.println("✅ Job completed successfully!");
+                System.out.println("Job completed successfully!");
             } else {
-                System.err.println("❌ Failed to receive completion message.");
+                System.err.println("Failed to receive completion message.");
             }
 
             // 7. If terminate mode, send termination AFTER this job completes
             if (terminateMode) {
                 sendTerminationMessage(aws);
-                System.out.println("✅ Termination message sent to Manager.");
+                System.out.println("Termination message sent to Manager.");
             }
 
             System.out.println("=== Local Application finished ===");
@@ -97,10 +97,10 @@ public class LocalApplication {
         } finally {
             // CRITICAL: Always clean up THIS job's done queue
             if (doneQueueUrl != null) {
-                System.out.println("🧹 Cleaning up job resources...");
+                System.out.println("Cleaning up job resources...");
                 try {
                     aws.deleteQueue(doneQueueUrl);
-                    System.out.println("✅ Job queue deleted: " + doneQueueName);
+                    System.out.println("Job queue deleted: " + doneQueueName);
                 } catch (Exception e) {
                     System.err.println("Error deleting job queue: " + e.getMessage());
                 }
@@ -113,19 +113,19 @@ public class LocalApplication {
                 InstanceStateName.RUNNING);
 
         if (!managers.isEmpty()) {
-            System.out.println("✅ Manager instance found.");
+            System.out.println("Manager instance found.");
             if (waitForManagerQueue(aws)) {
                 System.out.println("✅ Manager is ready.");
                 return;
             }
         }
 
-        System.out.println("❌ Manager not found. Launching...");
+        System.out.println("Manager not found. Launching...");
         launchManager(aws);
 
-        System.out.println("⏳ Waiting for Manager to initialize...");
+        System.out.println("Waiting for Manager to initialize...");
         if (!waitForManagerQueue(aws)) {
-            System.err.println("⚠️  Manager queue not detected. Proceeding anyway...");
+            System.err.println("Manager queue not detected. Proceeding anyway...");
         }
     }
 
@@ -160,7 +160,7 @@ public class LocalApplication {
 
         String userData = Base64.getEncoder().encodeToString(startupScript.getBytes());
         List<String> instanceIds = aws.launchInstances(1, userData, AWS.MANAGER_TAG_VALUE);
-        System.out.println("✅ Manager launched: " + instanceIds.get(0));
+        System.out.println("Manager launched: " + instanceIds.get(0));
     }
 
     private static boolean waitForManagerQueue(AWS aws) throws InterruptedException {
@@ -168,7 +168,7 @@ public class LocalApplication {
         while (totalWait < MAX_MANAGER_WAIT_SECONDS) {
             try {
                 aws.getQueueUrl(AWS.INPUT_QUEUE_NAME);
-                System.out.println("✅ Manager queue detected!");
+                System.out.println("Manager queue detected!");
                 return true;
             } catch (QueueDoesNotExistException e) {
                 System.out.print(".");
@@ -193,7 +193,7 @@ public class LocalApplication {
                 RequestBody.fromFile(file));
 
         String s3Url = "s3://" + AWS.S3_BUCKET_NAME + "/" + s3Key;
-        System.out.println("✅ Input uploaded: " + s3Url);
+        System.out.println("Input uploaded: " + s3Url);
         return s3Url;
     }
 
@@ -211,12 +211,12 @@ public class LocalApplication {
                 .messageBody(messageBody)
                 .build());
 
-        System.out.println("✅ Task sent to Manager.");
+        System.out.println("Task sent to Manager.");
     }
 
     private static String waitForCompletion(AWS aws, String doneQueueUrl, String jobId)
             throws InterruptedException {
-        System.out.println("⏳ Waiting for job " + jobId + " completion...");
+        System.out.println("Waiting for job " + jobId + " completion...");
 
         while (true) {
             ReceiveMessageResponse response = aws.getSqsClient().receiveMessage(
@@ -236,7 +236,7 @@ public class LocalApplication {
                         .receiptHandle(message.receiptHandle())
                         .build());
 
-                System.out.println("✅ Job " + jobId + " completion message received!");
+                System.out.println("Job " + jobId + " completion message received!");
                 return summaryS3Url;
             } else {
                 System.out.print(".");
@@ -263,7 +263,7 @@ public class LocalApplication {
                         .build(),
                 ResponseTransformer.toFile(Paths.get(outputFileName)));
 
-        System.out.println("✅ Summary downloaded: " + outputFileName);
+        System.out.println("Summary downloaded: " + outputFileName);
     }
 
     private static void sendTerminationMessage(AWS aws) {

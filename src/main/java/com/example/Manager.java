@@ -37,7 +37,7 @@ public class Manager {
                     .queueUrl(taskQueueUrl)
                     .attributes(Map.of(QueueAttributeName.VISIBILITY_TIMEOUT, "600"))
                     .build());
-            System.out.println("✅ Task queue visibility timeout set.");
+            System.out.println("Task queue visibility timeout set.");
 
             // Discover existing workers
             discoverExistingWorkers(aws);
@@ -201,7 +201,7 @@ public class Manager {
             activeWorkerIds.put(id, id);
         }
 
-        System.out.println("✅ Launched " + toLaunch + " workers.");
+        System.out.println("Launched " + toLaunch + " workers.");
     }
 
     private static List<String> parseInputFile(AWS aws, String s3Url) throws Exception {
@@ -339,15 +339,15 @@ public class Manager {
         if (!activeWorkerIds.isEmpty()) {
             List<String> workerIds = new ArrayList<>(activeWorkerIds.keySet());
             aws.terminateInstances(workerIds);
-            System.out.println("✅ Workers terminated.");
+            System.out.println("Workers terminated.");
         }
 
         // 2. Delete shared queues (assignment: clean up resources)
-        System.out.println("🧹 Cleaning up Manager queues...");
+        System.out.println("Cleaning up Manager queues...");
         try {
             String inputQueueUrl = aws.getQueueUrl(AWS.INPUT_QUEUE_NAME);
             aws.deleteQueue(inputQueueUrl);
-            System.out.println("✅ Input queue deleted.");
+            System.out.println("Input queue deleted.");
         } catch (Exception e) {
             System.err.println("Note: Input queue cleanup: " + e.getMessage());
         }
@@ -355,7 +355,7 @@ public class Manager {
         try {
             String taskQueueUrl = aws.getQueueUrl(AWS.TASK_QUEUE_NAME);
             aws.deleteQueue(taskQueueUrl);
-            System.out.println("✅ Task queue deleted.");
+            System.out.println("Task queue deleted.");
         } catch (Exception e) {
             System.err.println("Note: Task queue cleanup: " + e.getMessage());
         }
@@ -363,7 +363,7 @@ public class Manager {
         try {
             String resultQueueUrl = aws.getQueueUrl(AWS.RESULT_QUEUE_NAME);
             aws.deleteQueue(resultQueueUrl);
-            System.out.println("✅ Result queue deleted.");
+            System.out.println("Result queue deleted.");
         } catch (Exception e) {
             System.err.println("Note: Result queue cleanup: " + e.getMessage());
         }
@@ -379,9 +379,9 @@ public class Manager {
         String managerId = aws.getCurrentInstanceId();
         if (managerId != null) {
             aws.terminateInstances(List.of(managerId));
-            System.out.println("✅ Manager self-terminated.");
+            System.out.println("Manager self-terminated.");
         } else {
-            System.out.println("⚠️  Could not get instance ID. Manual cleanup may be needed.");
+            System.out.println("Could not get instance ID. Manual cleanup may be needed.");
         }
     }
 }

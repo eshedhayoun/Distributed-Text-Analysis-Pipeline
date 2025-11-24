@@ -228,12 +228,12 @@ public final class AWS {
                 }
             }
         } catch (Exception e) {
-            System.err.println("⚠️ Metadata service unavailable: " + e.getMessage());
+            System.err.println("⚠Metadata service unavailable: " + e.getMessage());
         }
 
         // Fallback: Find Manager by tag
         try {
-            System.out.println("🔍 Falling back to finding Manager by tag...");
+            System.out.println("Falling back to finding Manager by tag...");
             DescribeInstancesResponse response = ec2Client.describeInstances(
                     DescribeInstancesRequest.builder()
                             .filters(
@@ -250,11 +250,11 @@ public final class AWS {
                     .orElse(null);
 
             if (instanceId != null) {
-                System.out.println("✅ Found Manager instance ID: " + instanceId);
+                System.out.println("Found Manager instance ID: " + instanceId);
             }
             return instanceId;
         } catch (Exception e) {
-            System.err.println("❌ Failed to find Manager by tag: " + e.getMessage());
+            System.err.println("Failed to find Manager by tag: " + e.getMessage());
             return null;
         }
     }

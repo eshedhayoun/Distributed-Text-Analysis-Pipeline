@@ -151,10 +151,10 @@ public class Worker {
                     .messageBody(resultMessage)
                     .build());
 
-            System.out.println("✅ Task complete.");
+            System.out.println("Task complete.");
 
         } catch (Exception e) {
-            System.err.println("❌ Task failed: " + e.getMessage());
+            System.err.println("Task failed: " + e.getMessage());
 
             // Send error result
             try {
