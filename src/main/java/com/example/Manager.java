@@ -108,6 +108,11 @@ public class Manager {
             return true;
         }
 
+        if (terminationReceived) {
+            System.out.println("Manager is terminating. Rejecting new job: " + body);
+            return false;
+        }
+
         // Parse: inputS3Url|doneQueueName|n
         String[] parts = body.split("\\|", 3);
         if (parts.length == 3) {

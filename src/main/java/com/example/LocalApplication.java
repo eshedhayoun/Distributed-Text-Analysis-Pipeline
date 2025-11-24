@@ -115,9 +115,18 @@ public class LocalApplication {
         if (!managers.isEmpty()) {
             System.out.println("Manager instance found.");
             if (waitForManagerQueue(aws)) {
-                System.out.println("✅ Manager is ready.");
+                System.out.println("Manager is ready.");
                 return;
             }
+        }
+
+        List<Instance> terminatingManagers = aws.findInstancesByTag(AWS.MANAGER_TAG_VALUE,
+                InstanceStateName.SHUTTING_DOWN, InstanceStateName.STOPPING);
+
+        if (!terminatingManagers.isEmpty()) {
+            System.out.println("Manager is terminating. Waiting for it to shut down...");
+            // Wait for old manager to fully terminate
+            waitForManagerToTerminate(aws);
         }
 
         System.out.println("Manager not found. Launching...");
@@ -127,6 +136,30 @@ public class LocalApplication {
         if (!waitForManagerQueue(aws)) {
             System.err.println("Manager queue not detected. Proceeding anyway...");
         }
+    }
+
+    // ADD THIS NEW METHOD
+    private static void waitForManagerToTerminate(AWS aws) throws InterruptedException {
+        int maxWait = 120; // 2 minutes
+        int waited = 0;
+
+        while (waited < maxWait) {
+            List<Instance> terminatingManagers = aws.findInstancesByTag(AWS.MANAGER_TAG_VALUE,
+                    InstanceStateName.SHUTTING_DOWN, InstanceStateName.STOPPING,
+                    InstanceStateName.RUNNING);
+
+            if (terminatingManagers.isEmpty()) {
+                System.out.println("Old manager terminated.");
+                TimeUnit.SECONDS.sleep(10); // Wait a bit more for cleanup
+                return;
+            }
+
+            System.out.print(".");
+            TimeUnit.SECONDS.sleep(5);
+            waited += 5;
+        }
+
+        System.out.println("\n Manager still terminating after " + maxWait + " seconds. Proceeding...");
     }
 
     private static void launchManager(AWS aws) {
