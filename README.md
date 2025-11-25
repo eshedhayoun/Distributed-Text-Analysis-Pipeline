@@ -226,5 +226,5 @@ Tested with 3 clients running simultaneously, each submitting different jobs. Al
 - pom.xml
 - Sample input file (input-samples/input-sample.txt)
 - Output from sample run (output.html)
-- This README
+- This READMEs
 - Note: External libraries (AWS SDK, CoreNLP) not included—download via Maven
