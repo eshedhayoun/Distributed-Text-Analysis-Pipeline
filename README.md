@@ -107,7 +107,7 @@ java -jar target/distributed-text-analysis-pipeline-1.0-SNAPSHOT.jar input-sampl
 - n value: 3
 - Workers launched: 3
 - Processing time: 45 seconds
-- Output file: `output.html` (included in submission)
+- Output file: `output.html` 
 
 ## How It Works
 
@@ -143,7 +143,7 @@ For larger scale (billions): Would need multiple manager instances behind a load
 
 **Network errors:** Workers catch exceptions and send error messages to result queue. Manager marks failed tasks in output. All AWS services have built-in redundancy.
 
-**Broken communications:** All AWS SDK calls have automatic retry with exponential backoff. Workers continue processing other tasks if one URL fails.
+**Broken communications:** The AWS SDK automatically retries failed calls. Workers continue processing other tasks if one URL fails.
 
 ### Concurrency
 
@@ -213,7 +213,7 @@ Tested with 3 clients running simultaneously, each submitting different jobs. Al
 
 **Workers not processing?**
 - Check EC2 console for running workers
-- SSH into worker: `ssh -i key.pem ubuntu@<worker-ip>` → `tail -f worker.log`
+- Verify SQS queues created for the job
 
 **Tasks failing?**
 - Check input URLs are accessible
