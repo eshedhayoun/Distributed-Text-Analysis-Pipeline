@@ -35,14 +35,12 @@
             <version>2.28.18</version>
         </dependency>
 
-        <!-- Stanford CoreNLP - Main Library -->
         <dependency>
             <groupId>edu.stanford.nlp</groupId>
             <artifactId>stanford-corenlp</artifactId>
             <version>3.6.0</version>
         </dependency>
 
-        <!-- Stanford CoreNLP - Models (CRITICAL - This was missing!) -->
         <dependency>
             <groupId>edu.stanford.nlp</groupId>
             <artifactId>stanford-corenlp</artifactId>

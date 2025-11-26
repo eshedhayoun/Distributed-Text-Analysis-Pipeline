@@ -138,7 +138,6 @@ public class LocalApplication {
         }
     }
 
-    // ADD THIS NEW METHOD
     private static void waitForManagerToTerminate(AWS aws) throws InterruptedException {
         int maxWait = 120; // 2 minutes
         int waited = 0;

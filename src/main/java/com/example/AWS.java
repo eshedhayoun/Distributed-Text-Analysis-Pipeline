@@ -9,6 +9,10 @@ import software.amazon.awssdk.services.s3.model.*;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.*;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.URL;
+import java.net.URLConnection;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -49,7 +53,6 @@ public final class AWS {
     // S3 JAR Paths
     public static final String MANAGER_JAR_KEY = "jars/distributed-text-analysis-pipeline-1.0-SNAPSHOT.jar";
     public static final String WORKER_JAR_KEY = "jars/distributed-text-analysis-pipeline-1.0-SNAPSHOT.jar";
-    public static final String STANFORD_JAR_KEY = "jars/stanford-corenlp-4.5.1.jar";
 
     // AWS Clients
     private final S3Client s3Client;
@@ -76,14 +79,6 @@ public final class AWS {
 
     public SqsClient getSqsClient() {
         return sqsClient;
-    }
-
-    public Ec2Client getEc2Client() {
-        return ec2Client;
-    }
-
-    public Region getRegion() {
-        return REGION;
     }
 
     // ==================== S3 HELPERS ====================
@@ -215,20 +210,20 @@ public final class AWS {
     public String getCurrentInstanceId() {
         // Try metadata service first (faster)
         try {
-            java.net.URL url = new java.net.URL("http://169.254.169.254/latest/meta-data/instance-id");
-            java.net.URLConnection conn = url.openConnection();
+            URL url = new URL("http://169.254.169.254/latest/meta-data/instance-id");
+            URLConnection conn = url.openConnection();
             conn.setConnectTimeout(2000);
             conn.setReadTimeout(2000);
 
-            try (java.io.BufferedReader reader = new java.io.BufferedReader(
-                    new java.io.InputStreamReader(conn.getInputStream()))) {
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(conn.getInputStream()))) {
                 String instanceId = reader.readLine();
                 if (instanceId != null && !instanceId.isEmpty()) {
                     return instanceId;
                 }
             }
         } catch (Exception e) {
-            System.err.println("⚠Metadata service unavailable: " + e.getMessage());
+            System.err.println("Metadata service unavailable: " + e.getMessage());
         }
 
         // Fallback: Find Manager by tag
