@@ -24,8 +24,8 @@ import java.util.concurrent.TimeUnit;
 
 public class Worker {
 
-    private static final int MAX_TEXT_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
-    private static final int DOWNLOAD_TIMEOUT_MS = 60000; // 1 minute
+    private static final int MAX_TEXT_SIZE_BYTES = 10 * 1024 * 1024;
+    private static final int DOWNLOAD_TIMEOUT_MS = 60000;
     private static StanfordCoreNLP pipeline;
 
     public static void main(String[] args) {
@@ -41,7 +41,6 @@ public class Worker {
         System.out.println("Task Queue: " + taskQueueName);
         System.out.println("Result Queue: " + resultQueueName);
 
-        // Initialize NLP pipeline
         initializeNLPPipeline();
 
         AWS aws = AWS.getInstance();
@@ -52,7 +51,6 @@ public class Worker {
 
             System.out.println("Worker ready. Processing tasks...");
 
-            // Main processing loop
             while (true) {
                 try {
                     ReceiveMessageResponse response = aws.getSqsClient().receiveMessage(
@@ -107,7 +105,6 @@ public class Worker {
         System.out.println("\n--- Processing task ---");
 
         try {
-            // Parse: ANALYSIS_TYPE\tURL|DONE_QUEUE_NAME
             String[] mainParts = body.split("\\|", 2);
             if (mainParts.length != 2) {
                 throw new IllegalArgumentException("Invalid message format");
@@ -127,22 +124,14 @@ public class Worker {
             System.out.println("Type: " + analysisType);
             System.out.println("URL: " + inputUrl);
 
-            // Validate analysis type
             if (!analysisType.equals("POS") && !analysisType.equals("CONSTITUENCY") &&
                     !analysisType.equals("DEPENDENCY")) {
                 throw new IllegalArgumentException("Unknown analysis type: " + analysisType);
             }
 
-            // 1. Download text
             String text = downloadText(inputUrl);
-
-            // 2. Perform analysis
             String analysisResult = performAnalysis(text, analysisType);
-
-            // 3. Upload result to S3
             String outputS3Url = uploadResultToS3(aws, analysisResult, doneQueueName, analysisType);
-
-            // 4. Send result to manager
             String resultMessage = String.format("%s|%s: <a href=\"%s\">%s</a> <a href=\"%s\">output</a>",
                     doneQueueName, analysisType, inputUrl, inputUrl, outputS3Url);
 
@@ -156,7 +145,6 @@ public class Worker {
         } catch (Exception e) {
             System.err.println("Task failed: " + e.getMessage());
 
-            // Send error result
             try {
                 String[] mainParts = body.split("\\|", 2);
                 String doneQueueName = mainParts.length > 1 ? mainParts[1] : "unknown";
@@ -177,7 +165,6 @@ public class Worker {
                 System.err.println("Failed to send error message: " + e2.getMessage());
             }
         } finally {
-            // Always delete message
             aws.getSqsClient().deleteMessage(DeleteMessageRequest.builder()
                     .queueUrl(taskQueueUrl)
                     .receiptHandle(receiptHandle)

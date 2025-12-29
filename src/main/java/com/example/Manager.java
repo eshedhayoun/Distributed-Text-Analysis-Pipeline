@@ -27,23 +27,19 @@ public class Manager {
         AWS aws = AWS.getInstance();
 
         try {
-            // Create all necessary queues
             String inputQueueUrl = aws.createQueue(AWS.INPUT_QUEUE_NAME);
             String taskQueueUrl = aws.createQueue(AWS.TASK_QUEUE_NAME);
             String resultQueueUrl = aws.createQueue(AWS.RESULT_QUEUE_NAME);
 
-            // Set visibility timeout for task queue
             aws.getSqsClient().setQueueAttributes(SetQueueAttributesRequest.builder()
                     .queueUrl(taskQueueUrl)
                     .attributes(Map.of(QueueAttributeName.VISIBILITY_TIMEOUT, "600"))
                     .build());
             System.out.println("Task queue visibility timeout set.");
 
-            // Discover existing workers
             discoverExistingWorkers(aws);
             System.out.println("Found " + activeWorkerIds.size() + " existing workers.");
 
-            // Start result monitoring thread (ONLY ONCE)
             if (!resultMonitorStarted) {
                 executor.submit(new ResultMonitor(aws, resultQueueUrl));
                 resultMonitorStarted = true;
@@ -51,14 +47,12 @@ public class Manager {
 
             System.out.println("Manager ready. Polling for tasks...");
 
-            // Main loop
             while (!terminationReceived || totalPendingTasks.get() > 0) {
                 if (terminationReceived && totalPendingTasks.get() == 0) {
                     System.out.println("All tasks complete. Shutting down...");
                     break;
                 }
 
-                // Poll for new tasks if not terminating
                 if (!terminationReceived) {
                     ReceiveMessageResponse response = aws.getSqsClient().receiveMessage(
                             ReceiveMessageRequest.builder()
@@ -69,7 +63,6 @@ public class Manager {
 
                     for (Message message : response.messages()) {
                         if (processClientMessage(aws, message, taskQueueUrl)) {
-                            // Termination received
                             aws.getSqsClient().deleteMessage(DeleteMessageRequest.builder()
                                     .queueUrl(inputQueueUrl)
                                     .receiptHandle(message.receiptHandle())
@@ -77,7 +70,6 @@ public class Manager {
                             break;
                         }
 
-                        // Delete processed message
                         aws.getSqsClient().deleteMessage(DeleteMessageRequest.builder()
                                 .queueUrl(inputQueueUrl)
                                 .receiptHandle(message.receiptHandle())
@@ -88,7 +80,6 @@ public class Manager {
                 TimeUnit.SECONDS.sleep(5);
             }
 
-            // Cleanup and terminate
             cleanupAndTerminate(aws);
 
         } catch (Exception e) {
@@ -113,7 +104,6 @@ public class Manager {
             return false;
         }
 
-        // Parse: inputS3Url|doneQueueName|n
         String[] parts = body.split("\\|", 3);
         if (parts.length == 3) {
             executor.submit(() -> handleJob(aws, parts[0], parts[1], Integer.parseInt(parts[2]), taskQueueUrl));
@@ -127,17 +117,14 @@ public class Manager {
         try {
             System.out.printf("\n[Job %s] Processing...\n", doneQueueName);
 
-            // 1. Download and parse input file
             List<String> tasks = parseInputFile(aws, inputS3Url);
             System.out.printf("[Job %s] Found %d tasks.\n", doneQueueName, tasks.size());
 
             if (tasks.isEmpty()) return;
 
-            // Track this job
             submittedTaskCounts.put(doneQueueName, tasks.size());
             totalPendingTasks.addAndGet(tasks.size());
 
-            // 2. Calculate workers needed and launch
             int requiredWorkers = (int) Math.ceil((double) tasks.size() / n);
             int currentWorkers = activeWorkerIds.size();
             int workersToLaunch = requiredWorkers - currentWorkers;
@@ -149,7 +136,6 @@ public class Manager {
                 launchWorkers(aws, workersToLaunch);
             }
 
-            // 3. Send tasks to queue
             for (String task : tasks) {
                 String taskMessage = task + "|" + doneQueueName;
                 aws.getSqsClient().sendMessage(SendMessageRequest.builder()
@@ -195,7 +181,7 @@ public class Manager {
                 "./aws/install",
                 "cd /home/ubuntu",
                 "/usr/local/bin/aws s3 cp s3://" + AWS.S3_BUCKET_NAME + "/" + AWS.WORKER_JAR_KEY + " Worker.jar",
-                "/usr/local/bin/aws s3 cp s3://" + AWS.S3_BUCKET_NAME + "/jars/lib/ lib/ --recursive",  // ← ADD THIS LINE
+                "/usr/local/bin/aws s3 cp s3://" + AWS.S3_BUCKET_NAME + "/jars/lib/ lib/ --recursive",
                 "java -cp Worker.jar:lib/* com.example.Worker " + AWS.TASK_QUEUE_NAME + " " + AWS.RESULT_QUEUE_NAME + " > worker.log 2>&1 &",                "echo 'Worker started'"
         );
 
@@ -269,7 +255,6 @@ public class Manager {
 
                         totalPendingTasks.decrementAndGet();
 
-                        // Check if job complete
                         Integer expected = submittedTaskCounts.get(doneQueueName);
                         List<String> jobResults = results.get(doneQueueName);
 
@@ -302,7 +287,6 @@ public class Manager {
         }
 
         private void createAndSendSummary(AWS aws, String doneQueueName, List<String> results) {
-            // Generate HTML
             StringBuilder html = new StringBuilder();
             html.append("<!DOCTYPE html>\n<html>\n<head>\n<title>Summary</title>\n</head>\n<body>\n");
             html.append("<h1>Text Analysis Summary</h1>\n<ul>\n");
@@ -311,7 +295,6 @@ public class Manager {
             }
             html.append("</ul>\n</body>\n</html>");
 
-            // Upload to S3
             String s3Key = "output/" + doneQueueName + "/summary.html";
             aws.getS3Client().putObject(
                     PutObjectRequest.builder()
@@ -324,7 +307,6 @@ public class Manager {
             String summaryUrl = "s3://" + AWS.S3_BUCKET_NAME + "/" + s3Key;
             System.out.println("Summary uploaded: " + summaryUrl);
 
-            // Send notification to client
             try {
                 String doneQueueUrl = aws.getQueueUrl(doneQueueName);
                 aws.getSqsClient().sendMessage(SendMessageRequest.builder()
@@ -340,14 +322,12 @@ public class Manager {
     private static void cleanupAndTerminate(AWS aws) {
         System.out.println("\n=== Manager Cleanup & Shutdown ===");
 
-        // 1. Terminate all workers
         if (!activeWorkerIds.isEmpty()) {
             List<String> workerIds = new ArrayList<>(activeWorkerIds.keySet());
             aws.terminateInstances(workerIds);
             System.out.println("Workers terminated.");
         }
 
-        // 2. Delete shared queues (assignment: clean up resources)
         System.out.println("Cleaning up Manager queues...");
         try {
             String inputQueueUrl = aws.getQueueUrl(AWS.INPUT_QUEUE_NAME);
@@ -373,14 +353,12 @@ public class Manager {
             System.err.println("Note: Result queue cleanup: " + e.getMessage());
         }
 
-        // 3. Wait briefly for cleanup
         try {
             TimeUnit.SECONDS.sleep(5);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
 
-        // 4. Self-terminate
         String managerId = aws.getCurrentInstanceId();
         if (managerId != null) {
             aws.terminateInstances(List.of(managerId));

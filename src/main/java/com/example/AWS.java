@@ -17,44 +17,28 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
-/**
- * AWS utility singleton - provides AWS service clients and simple helper methods.
- * This is a TOOL for LocalApplication, Manager, and Worker to use.
- * Contains NO business logic - just makes AWS operations easier.
- */
 public final class AWS {
 
-    // ==================== CONFIGURATION - UPDATE THESE ====================
 
     private static final Region REGION = Region.US_EAST_1;
+    public static final String S3_BUCKET_NAME = "your-bucket-name";
 
-    // IMPORTANT: Make this globally unique!
-    public static final String S3_BUCKET_NAME = "distributed-text-analysis-pipeline-inputs-us-east-1";
+    public static final String AMI_ID = "ami-xxxxxxxxxxxxxxxxx";
 
-    // IMPORTANT: Replace with your AMI ID
-    public static final String AMI_ID = "ami-0ecb62995f68bb549";
-
-    // ======================================================================
-
-    // Queue Names
     public static final String INPUT_QUEUE_NAME = "Client_Manager_Queue";
     public static final String TASK_QUEUE_NAME = "Manager_Worker_TaskQueue";
     public static final String RESULT_QUEUE_NAME = "Manager_Results_Queue";
 
-    // EC2 Configuration
     public static final String INSTANCE_TYPE = "t3.micro";
     public static final int MAX_INSTANCES = 19;
 
-    // EC2 Tags
     public static final String INSTANCE_TAG_KEY = "Type";
     public static final String MANAGER_TAG_VALUE = "Manager";
     public static final String WORKER_TAG_VALUE = "Worker";
 
-    // S3 JAR Paths
-    public static final String MANAGER_JAR_KEY = "jars/distributed-text-analysis-pipeline-1.0-SNAPSHOT.jar";
-    public static final String WORKER_JAR_KEY = "jars/distributed-text-analysis-pipeline-1.0-SNAPSHOT.jar";
+    public static final String MANAGER_JAR_KEY = "jars/your-bucket-name-1.0-SNAPSHOT.jar";
+    public static final String WORKER_JAR_KEY = "jars/your-bucket-name-1.0-SNAPSHOT.jar";
 
-    // AWS Clients
     private final S3Client s3Client;
     private final SqsClient sqsClient;
     private final Ec2Client ec2Client;
@@ -70,22 +54,13 @@ public final class AWS {
     public static AWS getInstance() {
         return instance;
     }
-
-    // ==================== CLIENT GETTERS ====================
-
     public S3Client getS3Client() {
         return s3Client;
     }
-
     public SqsClient getSqsClient() {
         return sqsClient;
     }
 
-    // ==================== S3 HELPERS ====================
-
-    /**
-     * Creates S3 bucket if it doesn't exist.
-     */
     public void createBucketIfNotExists(String bucketName) {
         try {
             s3Client.createBucket(CreateBucketRequest.builder()
@@ -101,11 +76,6 @@ public final class AWS {
         }
     }
 
-    // ==================== SQS HELPERS ====================
-
-    /**
-     * Creates a queue, returns URL. If queue exists, returns existing URL.
-     */
     public String createQueue(String queueName) {
         try {
             return sqsClient.createQueue(CreateQueueRequest.builder()
@@ -116,30 +86,18 @@ public final class AWS {
         }
     }
 
-    /**
-     * Gets URL of existing queue.
-     */
     public String getQueueUrl(String queueName) {
         return sqsClient.getQueueUrl(GetQueueUrlRequest.builder()
                 .queueName(queueName)
                 .build()).queueUrl();
     }
 
-    /**
-     * Deletes a queue by URL.
-     */
     public void deleteQueue(String queueUrl) {
         sqsClient.deleteQueue(DeleteQueueRequest.builder()
                 .queueUrl(queueUrl)
                 .build());
     }
 
-    // ==================== EC2 HELPERS ====================
-
-    /**
-     * Launches EC2 instances with specified configuration.
-     * Returns list of instance IDs.
-     */
     public List<String> launchInstances(int count, String userData, String tagValue) {
         RunInstancesResponse response = ec2Client.runInstances(
                 RunInstancesRequest.builder()
@@ -165,9 +123,6 @@ public final class AWS {
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Finds instances by tag value and state.
-     */
     public List<Instance> findInstancesByTag(String tagValue, InstanceStateName... states) {
         Filter tagFilter = Filter.builder()
                 .name("tag:" + INSTANCE_TAG_KEY)
@@ -193,9 +148,6 @@ public final class AWS {
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Terminates EC2 instances by IDs.
-     */
     public void terminateInstances(List<String> instanceIds) {
         if (instanceIds == null || instanceIds.isEmpty()) return;
 
@@ -204,11 +156,7 @@ public final class AWS {
                 .build());
     }
 
-    /**
-     * Gets current instance ID from EC2 metadata (only works when running ON EC2).
-     */
     public String getCurrentInstanceId() {
-        // Try metadata service first (faster)
         try {
             URL url = new URL("http://169.254.169.254/latest/meta-data/instance-id");
             URLConnection conn = url.openConnection();
@@ -226,7 +174,6 @@ public final class AWS {
             System.err.println("Metadata service unavailable: " + e.getMessage());
         }
 
-        // Fallback: Find Manager by tag
         try {
             System.out.println("Falling back to finding Manager by tag...");
             DescribeInstancesResponse response = ec2Client.describeInstances(
@@ -253,8 +200,6 @@ public final class AWS {
             return null;
         }
     }
-
-    // ==================== CLEANUP ====================
 
     public void close() {
         if (s3Client != null) s3Client.close();

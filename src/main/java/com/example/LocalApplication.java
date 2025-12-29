@@ -42,7 +42,6 @@ public class LocalApplication {
 
         boolean terminateMode = args.length == 4 && args[3].equalsIgnoreCase("terminate");
 
-        // Unique job ID for THIS specific job
         String jobId = UUID.randomUUID().toString();
         String doneQueueName = "DoneQueue-" + jobId;
         String doneQueueUrl = null;
@@ -54,36 +53,28 @@ public class LocalApplication {
             System.out.println("Job ID: " + jobId);
             System.out.println("Terminate mode: " + terminateMode);
 
-            // 0. Ensure S3 bucket exists
             aws.createBucketIfNotExists(AWS.S3_BUCKET_NAME);
             System.out.println("S3 Bucket ready: " + AWS.S3_BUCKET_NAME);
 
-            // 1. Check if Manager is running, if not - launch it
             ensureManagerIsRunning(aws);
 
-            // 2. Create unique done queue for THIS job BEFORE sending task
             doneQueueUrl = aws.createQueue(doneQueueName);
             System.out.println("Created done queue for this job: " + doneQueueName);
 
-            // 3. Upload input file to S3 (unique per job)
             String s3Key = "input/" + jobId + "/" + new File(inputFilePath).getName();
             String inputS3Url = uploadFileToS3(aws, inputFilePath, s3Key);
 
-            // 4. Send task message to Manager
             sendTaskToManager(aws, inputS3Url, doneQueueName, n);
 
-            // 5. Wait for THIS job completion
             String summaryS3Url = waitForCompletion(aws, doneQueueUrl, jobId);
 
             if (summaryS3Url != null) {
-                // 6. Download summary file
                 downloadSummaryFile(aws, summaryS3Url, outputFileName);
                 System.out.println("Job completed successfully!");
             } else {
                 System.err.println("Failed to receive completion message.");
             }
 
-            // 7. If terminate mode, send termination AFTER this job completes
             if (terminateMode) {
                 sendTerminationMessage(aws);
                 System.out.println("Termination message sent to Manager.");
@@ -95,7 +86,6 @@ public class LocalApplication {
             System.err.println("Error: " + e.getMessage());
             e.printStackTrace();
         } finally {
-            // CRITICAL: Always clean up THIS job's done queue
             if (doneQueueUrl != null) {
                 System.out.println("Cleaning up job resources...");
                 try {
@@ -125,7 +115,6 @@ public class LocalApplication {
 
         if (!terminatingManagers.isEmpty()) {
             System.out.println("Manager is terminating. Waiting for it to shut down...");
-            // Wait for old manager to fully terminate
             waitForManagerToTerminate(aws);
         }
 
@@ -139,7 +128,7 @@ public class LocalApplication {
     }
 
     private static void waitForManagerToTerminate(AWS aws) throws InterruptedException {
-        int maxWait = 120; // 2 minutes
+        int maxWait = 120;
         int waited = 0;
 
         while (waited < maxWait) {
@@ -149,7 +138,7 @@ public class LocalApplication {
 
             if (terminatingManagers.isEmpty()) {
                 System.out.println("Old manager terminated.");
-                TimeUnit.SECONDS.sleep(10); // Wait a bit more for cleanup
+                TimeUnit.SECONDS.sleep(10);
                 return;
             }
 
@@ -282,7 +271,6 @@ public class LocalApplication {
         String bucket = s3UrlStripped.substring(0, firstSlash);
         String key = s3UrlStripped.substring(firstSlash + 1);
 
-        // Delete existing file if it exists (so we can overwrite)
         File outputFile = new File(outputFileName);
         if (outputFile.exists()) {
             outputFile.delete();

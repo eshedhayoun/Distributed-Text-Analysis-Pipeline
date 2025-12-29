@@ -1,10 +1,9 @@
 # Distributed Text Analysis Pipeline
 
-**Authors:**
-- Eshed Hayoun (ID: 212206692)
-- Idan Sarfati (ID: 209167188)
+**Author:**
+Eshed Hayoun 
 
-A cloud-based distributed system for parallel natural language processing using AWS infrastructure (EC2, S3, SQS).
+This is a cloud-based distributed system for parallel natural language processing using AWS infrastructure (EC2, S3, SQS).
 
 ## What It Does
 
@@ -66,7 +65,7 @@ aws s3 cp target/lib/ s3://distributed-text-analysis-pipeline-inputs-us-east-1/j
 
 3. Update `AWS.java`:
 ```java
-public static final String AMI_ID = "ami-0ecb62995f68bb549"; // Ubuntu 22.04 LTS
+public static final String AMI_ID = "ami-xxxxxxxxxxxxxxxxx"; // Ubuntu 22.04 LTS
 ```
 
 ## Usage
@@ -96,7 +95,7 @@ java -jar target/distributed-text-analysis-pipeline-1.0-SNAPSHOT.jar input-sampl
 ## Configuration
 
 **Instance Type**: t3.micro  
-**AMI**: ami-0ecb62995f68bb549 (Ubuntu 22.04 LTS)  
+**AMI**: ami-xxxxxxxxxxxxxxxxx (Ubuntu 22.04 LTS)  
 **Region**: us-east-1  
 **Max Workers**: 18 (AWS limit: 19 instances including manager)
 
@@ -200,31 +199,3 @@ This system is truly distributed because:
 - One component failure doesn't block others
 - Multiple workers process tasks in parallel simultaneously
 - Nothing waits unnecessarily—the only blocking is the client waiting for final results, which is expected
-
-## Multiple Client Testing
-
-Tested with 3 clients running simultaneously, each submitting different jobs. All completed successfully with correct outputs. Workers were properly isolated per-job, and no resource conflicts occurred. Average time: 47 seconds per job.
-
-## Troubleshooting
-
-**Manager not starting?**
-- Check S3 bucket has JARs uploaded
-- Verify IAM permissions (EC2, S3, SQS)
-
-**Workers not processing?**
-- Check EC2 console for running workers
-- Verify SQS queues created for the job
-
-**Tasks failing?**
-- Check input URLs are accessible
-- Verify text files are under 10MB
-
-## Submission Contents
-
-- All source files (src/ directory)
-- Compiled classes (target/classes/)
-- pom.xml
-- Sample input file (input-samples/input-sample.txt)
-- Output from sample run (output.html)
-- This README
-- Note: External libraries (AWS SDK, CoreNLP) not included—download via Maven

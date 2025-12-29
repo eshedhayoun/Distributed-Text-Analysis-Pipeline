@@ -63,7 +63,6 @@
                 <version>3.11.0</version>
             </plugin>
 
-            <!-- Copy dependencies to lib folder -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-dependency-plugin</artifactId>
@@ -82,7 +81,6 @@
                 </executions>
             </plugin>
 
-            <!-- Create JAR with classpath reference to lib -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
