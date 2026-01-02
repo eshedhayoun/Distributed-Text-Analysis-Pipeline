@@ -66,7 +66,7 @@ public class Manager {
                     } else {
                         long waitTime = System.currentTimeMillis() - terminationStartTime;
                         if (waitTime > 120000) {
-                            System.out.println("⚠️ Termination timeout after 2 minutes!");
+                            System.out.println("Termination timeout after 2 minutes!");
                             System.out.println("Forcing shutdown with " + totalPendingTasks.get() + " pending tasks remaining.");
                             break;
                         }
@@ -136,7 +136,7 @@ public class Manager {
                     .queueUrl(watchdogQueueUrl)
                     .messageBody("MANAGER_READY")
                     .build());
-            System.out.println("✅ Sent ready signal to watchdog");
+            System.out.println("Sent ready signal to watchdog");
         } catch (Exception e) {
             System.err.println("Failed to signal watchdog: " + e.getMessage());
         }
@@ -291,7 +291,7 @@ public class Manager {
                 int pendingTasks = totalTasks - existingResults.size();
                 totalPendingTasks.addAndGet(pendingTasks);
 
-                System.out.printf("✅ Restored job %s: %d/%d tasks complete (%d pending)\n",
+                System.out.printf("Restored job %s: %d/%d tasks complete (%d pending)\n",
                         jobId, existingResults.size(), totalTasks, pendingTasks);
 
                 if (existingResults.size() == totalTasks) {
@@ -566,7 +566,7 @@ public class Manager {
 
             try {
                 aws.terminateInstances(workerIds);
-                System.out.println("✅ Workers terminated: " + workerIds);
+                System.out.println("Workers terminated: " + workerIds);
             } catch (Exception e) {
                 System.err.println("Error terminating workers: " + e.getMessage());
             }
@@ -587,7 +587,7 @@ public class Manager {
             try {
                 String queueUrl = aws.getQueueUrl(queueName);
                 aws.deleteQueue(queueUrl);
-                System.out.println("✅ Deleted queue: " + queueName);
+                System.out.println("Deleted queue: " + queueName);
             } catch (QueueDoesNotExistException e) {
                 System.out.println("Queue doesn't exist: " + queueName);
             } catch (Exception e) {
@@ -607,12 +607,12 @@ public class Manager {
             System.out.println("Self-terminating manager: " + managerId);
             try {
                 aws.terminateInstances(List.of(managerId));
-                System.out.println("✅ Manager self-terminated.");
+                System.out.println("Manager self-terminated.");
             } catch (Exception e) {
                 System.err.println("Error self-terminating: " + e.getMessage());
             }
         } else {
-            System.out.println("⚠️ Could not get instance ID. Manual cleanup may be needed.");
+            System.out.println("Could not get instance ID. Manual cleanup may be needed.");
         }
     }
 }

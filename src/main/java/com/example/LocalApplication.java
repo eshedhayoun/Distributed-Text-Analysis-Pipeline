@@ -74,7 +74,7 @@ public class LocalApplication {
 
             if (summaryS3Url != null) {
                 downloadSummaryFile(aws, summaryS3Url, outputFileName);
-                System.out.println("✅ Job completed successfully!");
+                System.out.println("Job completed successfully!");
             } else {
                 System.err.println("Failed to receive completion message.");
             }
@@ -144,7 +144,7 @@ public class LocalApplication {
                             boolean hasReadySignal = checkForReadySignal(aws);
                             if (hasReadySignal) {
                                 managerFullyReady = true;
-                                System.out.println("✅ Manager fully initialized and ready");
+                                System.out.println("Manager fully initialized and ready");
                             } else {
                                 System.out.println("Manager is initializing...");
                             }
@@ -167,10 +167,10 @@ public class LocalApplication {
                             state = allManagers.get(0).state().nameAsString();
                         }
 
-                        System.out.println("⚠️ Manager not healthy - state: " + state + " (" + consecutiveFailures + "/3)");
+                        System.out.println("Manager not healthy - state: " + state + " (" + consecutiveFailures + "/3)");
 
                         if (consecutiveFailures >= 3) {
-                            System.out.println("⚠️ Manager failed 3 consecutive checks!");
+                            System.out.println("Manager failed 3 consecutive checks!");
 
                             if (jobComplete.get()) {
                                 System.out.println("Job is complete - not restarting manager");
@@ -180,15 +180,15 @@ public class LocalApplication {
                             boolean hasPendingWork = checkForPendingJobs(aws);
 
                             if (terminateMode && !hasPendingWork) {
-                                System.out.println("✅ Terminate mode and no pending work. Manager terminated gracefully.");
+                                System.out.println("Terminate mode and no pending work. Manager terminated gracefully.");
                                 break;
                             }
 
                             if (hasPendingWork || !managerFullyReady) {
                                 if (hasPendingWork) {
-                                    System.out.println("⚠️ Pending work detected! Restarting manager...");
+                                    System.out.println("Pending work detected! Restarting manager...");
                                 } else {
-                                    System.out.println("⚠️ Manager died during initialization! Restarting...");
+                                    System.out.println("Manager died during initialization! Restarting...");
                                 }
 
                                 if (!allManagers.isEmpty()) {
@@ -208,13 +208,13 @@ public class LocalApplication {
 
                                 System.out.println("Waiting for new manager to initialize...");
                                 if (waitForManagerReadySignal(aws)) {
-                                    System.out.println("✅ New manager operational");
+                                    System.out.println("New manager operational");
                                     managerFullyReady = true;
                                 } else {
-                                    System.err.println("⚠️ New manager failed to initialize");
+                                    System.err.println("New manager failed to initialize");
                                 }
                             } else {
-                                System.out.println("✅ No pending work. Manager terminated gracefully.");
+                                System.out.println("No pending work. Manager terminated gracefully.");
                                 break;
                             }
                         }
@@ -311,7 +311,7 @@ public class LocalApplication {
                                 .receiptHandle(message.receiptHandle())
                                 .build());
 
-                        System.out.println("✅ Received manager ready signal!");
+                        System.out.println("Received manager ready signal!");
                         return true;
                     }
                 }
@@ -325,7 +325,7 @@ public class LocalApplication {
             }
         }
 
-        System.err.println("⚠️ Manager did not send ready signal within 5 minutes");
+        System.err.println("Manager did not send ready signal within 5 minutes");
         return false;
     }
 
@@ -406,7 +406,7 @@ public class LocalApplication {
                 );
 
                 if (managers.isEmpty()) {
-                    System.out.println("✅ Manager and workers terminated.");
+                    System.out.println("Manager and workers terminated.");
                     return;
                 }
 
@@ -415,7 +415,7 @@ public class LocalApplication {
                 waited += 5;
             }
 
-            System.out.println("\n⚠️ Manager still running after " + maxWait + " seconds.");
+            System.out.println("\nManager still running after " + maxWait + " seconds.");
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
