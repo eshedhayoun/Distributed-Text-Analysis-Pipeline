@@ -21,13 +21,14 @@ public final class AWS {
 
 
     private static final Region REGION = Region.US_EAST_1;
-    public static final String S3_BUCKET_NAME = "your-bucket-name";
+    public static final String S3_BUCKET_NAME = "distributed-text-analysis-pipeline-inputs-us-east-1";
 
-    public static final String AMI_ID = "ami-xxxxxxxxxxxxxxxxx";
+    public static final String AMI_ID = "ami-0ecb62995f68bb549";
 
     public static final String INPUT_QUEUE_NAME = "Client_Manager_Queue";
     public static final String TASK_QUEUE_NAME = "Manager_Worker_TaskQueue";
     public static final String RESULT_QUEUE_NAME = "Manager_Results_Queue";
+    public static final String WATCHDOG_QUEUE_NAME = "Manager_Watchdog_Queue";
 
     public static final String INSTANCE_TYPE = "t3.micro";
     public static final int MAX_INSTANCES = 19;
@@ -36,8 +37,8 @@ public final class AWS {
     public static final String MANAGER_TAG_VALUE = "Manager";
     public static final String WORKER_TAG_VALUE = "Worker";
 
-    public static final String MANAGER_JAR_KEY = "jars/your-bucket-name-1.0-SNAPSHOT.jar";
-    public static final String WORKER_JAR_KEY = "jars/your-bucket-name-1.0-SNAPSHOT.jar";
+    public static final String MANAGER_JAR_KEY = "jars/distributed-text-analysis-pipeline-1.0-SNAPSHOT.jar";
+    public static final String WORKER_JAR_KEY = "jars/distributed-text-analysis-pipeline-1.0-SNAPSHOT.jar";
 
     private final S3Client s3Client;
     private final SqsClient sqsClient;
@@ -54,6 +55,7 @@ public final class AWS {
     public static AWS getInstance() {
         return instance;
     }
+    public Region getRegion() { return REGION; }
     public S3Client getS3Client() {
         return s3Client;
     }

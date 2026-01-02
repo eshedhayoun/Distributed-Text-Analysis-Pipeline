@@ -12,6 +12,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class LocalApplication {
 
@@ -45,6 +46,7 @@ public class LocalApplication {
         String jobId = UUID.randomUUID().toString();
         String doneQueueName = "DoneQueue-" + jobId;
         String doneQueueUrl = null;
+        AtomicBoolean jobComplete = new AtomicBoolean(false);
 
         AWS aws = AWS.getInstance();
 
@@ -58,6 +60,8 @@ public class LocalApplication {
 
             ensureManagerIsRunning(aws);
 
+            startManagerWatchdog(aws, jobComplete, terminateMode);
+
             doneQueueUrl = aws.createQueue(doneQueueName);
             System.out.println("Created done queue for this job: " + doneQueueName);
 
@@ -70,19 +74,30 @@ public class LocalApplication {
 
             if (summaryS3Url != null) {
                 downloadSummaryFile(aws, summaryS3Url, outputFileName);
-                System.out.println("Job completed successfully!");
+                System.out.println("✅ Job completed successfully!");
             } else {
                 System.err.println("Failed to receive completion message.");
             }
 
+            jobComplete.set(true);
+            System.out.println("Job marked as complete.");
+
+            TimeUnit.SECONDS.sleep(2);
+
             if (terminateMode) {
                 sendTerminationMessage(aws);
                 System.out.println("Termination message sent to Manager.");
+
+                System.out.println("Waiting for manager to terminate...");
+                waitForManagerFullTermination(aws);
+            } else {
+                System.out.println("No termination requested - Manager will continue running for other jobs.");
             }
 
             System.out.println("=== Local Application finished ===");
 
         } catch (Exception e) {
+            jobComplete.set(true);
             System.err.println("Error: " + e.getMessage());
             e.printStackTrace();
         } finally {
@@ -95,6 +110,315 @@ public class LocalApplication {
                     System.err.println("Error deleting job queue: " + e.getMessage());
                 }
             }
+        }
+    }
+
+    private static void startManagerWatchdog(AWS aws, AtomicBoolean jobComplete, boolean terminateMode) {
+        Thread watchdog = new Thread(() -> {
+            System.out.println("Manager watchdog started - monitoring initialization...");
+
+            int consecutiveFailures = 0;
+            boolean managerFullyReady = false;
+
+            while (!jobComplete.get()) {
+                try {
+                    TimeUnit.SECONDS.sleep(60);
+
+                    if (jobComplete.get()) {
+                        System.out.println("Job is complete - watchdog will stop checking");
+                        break;
+                    }
+
+                    List<Instance> managers = aws.findInstancesByTag(
+                            AWS.MANAGER_TAG_VALUE,
+                            InstanceStateName.PENDING,
+                            InstanceStateName.RUNNING
+                    );
+
+                    boolean managerHealthy = isManagerHealthy(managers);
+
+                    if (managerHealthy) {
+                        consecutiveFailures = 0;
+
+                        if (!managerFullyReady) {
+                            boolean hasReadySignal = checkForReadySignal(aws);
+                            if (hasReadySignal) {
+                                managerFullyReady = true;
+                                System.out.println("✅ Manager fully initialized and ready");
+                            } else {
+                                System.out.println("Manager is initializing...");
+                            }
+                        }
+                    } else {
+                        consecutiveFailures++;
+
+                        List<Instance> allManagers = aws.findInstancesByTag(
+                                AWS.MANAGER_TAG_VALUE,
+                                InstanceStateName.RUNNING,
+                                InstanceStateName.PENDING,
+                                InstanceStateName.STOPPING,
+                                InstanceStateName.SHUTTING_DOWN,
+                                InstanceStateName.STOPPED,
+                                InstanceStateName.TERMINATED
+                        );
+
+                        String state = "not found";
+                        if (!allManagers.isEmpty()) {
+                            state = allManagers.get(0).state().nameAsString();
+                        }
+
+                        System.out.println("⚠️ Manager not healthy - state: " + state + " (" + consecutiveFailures + "/3)");
+
+                        if (consecutiveFailures >= 3) {
+                            System.out.println("⚠️ Manager failed 3 consecutive checks!");
+
+                            if (jobComplete.get()) {
+                                System.out.println("Job is complete - not restarting manager");
+                                break;
+                            }
+
+                            boolean hasPendingWork = checkForPendingJobs(aws);
+
+                            if (terminateMode && !hasPendingWork) {
+                                System.out.println("✅ Terminate mode and no pending work. Manager terminated gracefully.");
+                                break;
+                            }
+
+                            if (hasPendingWork || !managerFullyReady) {
+                                if (hasPendingWork) {
+                                    System.out.println("⚠️ Pending work detected! Restarting manager...");
+                                } else {
+                                    System.out.println("⚠️ Manager died during initialization! Restarting...");
+                                }
+
+                                if (!allManagers.isEmpty()) {
+                                    List<String> managerIds = allManagers.stream()
+                                            .map(Instance::instanceId)
+                                            .collect(java.util.stream.Collectors.toList());
+                                    aws.terminateInstances(managerIds);
+                                    System.out.println("Terminated old manager instances");
+                                    TimeUnit.SECONDS.sleep(30);
+                                }
+
+                                launchManager(aws);
+                                System.out.println("New manager launched");
+
+                                consecutiveFailures = 0;
+                                managerFullyReady = false;
+
+                                System.out.println("Waiting for new manager to initialize...");
+                                if (waitForManagerReadySignal(aws)) {
+                                    System.out.println("✅ New manager operational");
+                                    managerFullyReady = true;
+                                } else {
+                                    System.err.println("⚠️ New manager failed to initialize");
+                                }
+                            } else {
+                                System.out.println("✅ No pending work. Manager terminated gracefully.");
+                                break;
+                            }
+                        }
+                    }
+
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                } catch (Exception e) {
+                    System.err.println("Watchdog error: " + e.getMessage());
+                }
+            }
+
+            System.out.println("Manager watchdog stopped.");
+        });
+
+        watchdog.setDaemon(true);
+        watchdog.start();
+    }
+
+    private static boolean isManagerHealthy(List<Instance> managers) {
+        if (managers.isEmpty()) {
+            return false;
+        }
+
+        Instance manager = managers.get(0);
+        String state = manager.state().nameAsString();
+
+        return state.equals("pending") || state.equals("running");
+    }
+
+    private static boolean checkForReadySignal(AWS aws) {
+        try {
+            String watchdogQueueUrl = aws.getQueueUrl(AWS.WATCHDOG_QUEUE_NAME);
+
+            ReceiveMessageResponse response = aws.getSqsClient().receiveMessage(
+                    ReceiveMessageRequest.builder()
+                            .queueUrl(watchdogQueueUrl)
+                            .maxNumberOfMessages(1)
+                            .waitTimeSeconds(0)
+                            .build());
+
+            if (!response.messages().isEmpty()) {
+                Message message = response.messages().get(0);
+
+                if (message.body().equals("MANAGER_READY")) {
+                    aws.getSqsClient().deleteMessage(DeleteMessageRequest.builder()
+                            .queueUrl(watchdogQueueUrl)
+                            .receiptHandle(message.receiptHandle())
+                            .build());
+
+                    return true;
+                }
+            }
+
+            return false;
+
+        } catch (QueueDoesNotExistException e) {
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static boolean waitForManagerReadySignal(AWS aws) throws InterruptedException {
+        System.out.println("Waiting for manager ready signal...");
+
+        String watchdogQueueUrl;
+        try {
+            watchdogQueueUrl = aws.createQueue(AWS.WATCHDOG_QUEUE_NAME);
+        } catch (Exception e) {
+            System.err.println("Failed to create watchdog queue: " + e.getMessage());
+            return false;
+        }
+
+        int maxWaitSeconds = 300;
+        int waited = 0;
+
+        while (waited < maxWaitSeconds) {
+            try {
+                ReceiveMessageResponse response = aws.getSqsClient().receiveMessage(
+                        ReceiveMessageRequest.builder()
+                                .queueUrl(watchdogQueueUrl)
+                                .maxNumberOfMessages(1)
+                                .waitTimeSeconds(20)
+                                .build());
+
+                if (!response.messages().isEmpty()) {
+                    Message message = response.messages().get(0);
+
+                    if (message.body().equals("MANAGER_READY")) {
+                        aws.getSqsClient().deleteMessage(DeleteMessageRequest.builder()
+                                .queueUrl(watchdogQueueUrl)
+                                .receiptHandle(message.receiptHandle())
+                                .build());
+
+                        System.out.println("✅ Received manager ready signal!");
+                        return true;
+                    }
+                }
+
+                waited += 20;
+
+            } catch (Exception e) {
+                System.err.println("Error waiting for ready signal: " + e.getMessage());
+                TimeUnit.SECONDS.sleep(5);
+                waited += 5;
+            }
+        }
+
+        System.err.println("⚠️ Manager did not send ready signal within 5 minutes");
+        return false;
+    }
+
+    private static boolean checkForPendingJobs(AWS aws) {
+        try {
+            String inputQueueUrl = aws.getQueueUrl(AWS.INPUT_QUEUE_NAME);
+            GetQueueAttributesResponse inputAttrs = aws.getSqsClient().getQueueAttributes(
+                    GetQueueAttributesRequest.builder()
+                            .queueUrl(inputQueueUrl)
+                            .attributeNames(QueueAttributeName.APPROXIMATE_NUMBER_OF_MESSAGES)
+                            .build()
+            );
+
+            int inputMessages = Integer.parseInt(
+                    inputAttrs.attributes().getOrDefault(QueueAttributeName.APPROXIMATE_NUMBER_OF_MESSAGES, "0")
+            );
+
+            String taskQueueUrl = aws.getQueueUrl(AWS.TASK_QUEUE_NAME);
+            GetQueueAttributesResponse taskAttrs = aws.getSqsClient().getQueueAttributes(
+                    GetQueueAttributesRequest.builder()
+                            .queueUrl(taskQueueUrl)
+                            .attributeNames(QueueAttributeName.APPROXIMATE_NUMBER_OF_MESSAGES,
+                                    QueueAttributeName.APPROXIMATE_NUMBER_OF_MESSAGES_NOT_VISIBLE)
+                            .build()
+            );
+
+            int taskMessages = Integer.parseInt(
+                    taskAttrs.attributes().getOrDefault(QueueAttributeName.APPROXIMATE_NUMBER_OF_MESSAGES, "0")
+            );
+            int taskMessagesInFlight = Integer.parseInt(
+                    taskAttrs.attributes().getOrDefault(QueueAttributeName.APPROXIMATE_NUMBER_OF_MESSAGES_NOT_VISIBLE, "0")
+            );
+
+            String resultQueueUrl = aws.getQueueUrl(AWS.RESULT_QUEUE_NAME);
+            GetQueueAttributesResponse resultAttrs = aws.getSqsClient().getQueueAttributes(
+                    GetQueueAttributesRequest.builder()
+                            .queueUrl(resultQueueUrl)
+                            .attributeNames(QueueAttributeName.APPROXIMATE_NUMBER_OF_MESSAGES)
+                            .build()
+            );
+
+            int resultMessages = Integer.parseInt(
+                    resultAttrs.attributes().getOrDefault(QueueAttributeName.APPROXIMATE_NUMBER_OF_MESSAGES, "0")
+            );
+
+            boolean hasPending = (inputMessages > 0) || (taskMessages > 0) ||
+                    (taskMessagesInFlight > 0) || (resultMessages > 0);
+
+            if (hasPending) {
+                System.out.println("Pending work detected: " +
+                        "input=" + inputMessages + ", " +
+                        "tasks=" + taskMessages + ", " +
+                        "tasksInFlight=" + taskMessagesInFlight + ", " +
+                        "results=" + resultMessages);
+            }
+
+            return hasPending;
+
+        } catch (QueueDoesNotExistException e) {
+            return false;
+        } catch (Exception e) {
+            System.err.println("Error checking pending jobs: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private static void waitForManagerFullTermination(AWS aws) {
+        int maxWait = 180;
+        int waited = 0;
+
+        try {
+            while (waited < maxWait) {
+                List<Instance> managers = aws.findInstancesByTag(
+                        AWS.MANAGER_TAG_VALUE,
+                        InstanceStateName.RUNNING,
+                        InstanceStateName.SHUTTING_DOWN,
+                        InstanceStateName.STOPPING
+                );
+
+                if (managers.isEmpty()) {
+                    System.out.println("✅ Manager and workers terminated.");
+                    return;
+                }
+
+                System.out.print(".");
+                TimeUnit.SECONDS.sleep(5);
+                waited += 5;
+            }
+
+            System.out.println("\n⚠️ Manager still running after " + maxWait + " seconds.");
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -147,7 +471,7 @@ public class LocalApplication {
             waited += 5;
         }
 
-        System.out.println("\n Manager still terminating after " + maxWait + " seconds. Proceeding...");
+        System.out.println("\nManager still terminating after " + maxWait + " seconds. Proceeding...");
     }
 
     private static void launchManager(AWS aws) {
@@ -172,7 +496,8 @@ public class LocalApplication {
                 "ls -lh lib/ | head -5",
                 "echo 'Starting Manager Java process...'",
                 "java -version",
-                "java -cp Manager.jar:lib/* com.example.Manager > manager.log 2>&1 &",                "sleep 5",
+                "java -cp Manager.jar:lib/* com.example.Manager > manager.log 2>&1 &",
+                "sleep 5",
                 "ps aux | grep java",
                 "echo '=== Manager log ==='",
                 "cat manager.log",
